@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {instanceLabelPages,applyInstanceLabels,makeInstanceContactSheet} from '../object-instance-labels.mjs';
 import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url);
-const {normalizeObjects}=require('../api/ai/object-labels');
+const {normalizeObjects}=require('../lib/object-instance-label-handler');
 
 const objects=Array.from({length:53},(_,i)=>({
   id:i+1,area:53-i,box:{x:10+(i%6),y:20,w:8,h:8},colorId:2,label:'Object '+(i+1),category:'Other'
