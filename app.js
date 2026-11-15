@@ -1,4 +1,5 @@
 import {planSidebarRender} from './sidebar-render-state.mjs';
+import {createMobilePinch} from './mobile-pinch.mjs';
 import {isCreatedGroup,orderedSceneGroups,bringGroupToFront,createdOccluderCandidates} from './object-mask-utils.mjs';
 /* Mosaic — manual-first, local-only image compositor.
    Each uploaded variation is a temporary top layer until its mask is applied.
@@ -202,6 +203,14 @@ function updateSourceActions(){
   window.MosaicSources?.refresh?.();
 }
 function resetSelection(deferMask=false){window.MosaicObjects?.cancelSelection?.();$('selectionOutlineVectors')?.replaceChildren();state.selectionPaths=[];state.maskMoveDrag=null;state.maskEditOnly=false;state.manualAreaSelection=false;activeMaskVertex=null;hoverMaskEdge=null;maskEditVersion++;state.selectionPoints=[];state.selectionTargetPatchId=null;state.maskVertexDrag=null;state.selectionGeometry=null;state.selectionMask=state.master&&!deferMask?makeCanvas(canvas.width,canvas.height):null;state.boundaryCanvas=null;state.draftGroupId=null;state.selectionOverlayHidden=false;state.forceNewSelectionGroup=false;state.pendingRevealOnly=false;hideQuickPrompt();clearDraft();updateApplyButton();clearHover()}
+function clearObjectSelection(){
+  // A blank tap dismisses both the canvas mask and the highlighted Management row.
+  resetSelection(true);
+  state.focusedGroupId=null;state.expandedObjectId=null;state.expandedOptionId=null;
+  state.selectedPatchId=null;state.queuedGroupId=null;state.hoveredGroupId=null;
+  document.querySelectorAll('.region-group.object-focused').forEach(row=>row.classList.remove('object-focused'));
+  renderGroups();render();
+}
 function updateApplyButton(){
   const pending=Boolean(state.pendingSourceId),editing=Boolean(state.editingPatchId),btn=$('commitBtn');
   btn.disabled=!(pending||editing)||!Boolean(selectionBounds());
@@ -1450,7 +1459,7 @@ function groupEvent(e){if(window.MosaicRegions?.handleGroupEvent(e))return;if(wi
   if(action==='retry-create-cleanup'){void window.MosaicPremium?.retryCreateCleanup(pid);return}
   if(action==='toggle-category'){if(target.dataset.category===UNNAMED_OBJECTS)state.expandedUnnamedObjects=!state.expandedUnnamedObjects;else{const collapsed=new Set(state.collapsedCategories||[]);if(collapsed.has(target.dataset.category))collapsed.delete(target.dataset.category);else collapsed.add(target.dataset.category);state.collapsedCategories=[...collapsed]}renderGroups();return}
   if(action==='rename-collection'){const section=target.closest('.object-category');section?.classList.add('renaming');const input=section?.querySelector('.collection-name');input?.focus();input?.select();return}
-  if(action==='focus'&&group){hideQuickPrompt();selectGroupMask(group);return}
+  if(action==='focus'&&group){hideQuickPrompt();selectGroupMask(group,{showOutline:true});return}
   if(action==='edit-mask'&&group){hideQuickPrompt();selectGroupMask(group,{showOutline:true});state.maskEditOnly=true;state.selectionOverlayHidden=false;updateSelectionOutline();renderGroups();render();return}
   if(action==='edit-image'){window.MosaicSourceEditor?.openOption(pid);return}
   if(action==='edit'){editExisting(pid);return}
@@ -2254,7 +2263,7 @@ function pointerUp(e){
       if(group){if(mods.append)appendGroupSelection(group);else selectGroupMask(group,{showOutline:true});
         focusGroupInSidebar(group);showQuickPrompt({clientX:e.clientX,clientY:e.clientY});}
       else if(state.objectMap?.raster)window.MosaicSlimWand?.selectAt?.(point,mods);
-      else{resetSelection();render();message('Upload a Base and prepare objects, or use Create to draw one.');}
+      else{clearObjectSelection();message('Tap an object in the image or Groups to select it.');}
     }
     drawOverlay();return;
   }
@@ -2513,12 +2522,42 @@ const moveCompare=event=>{const box=compareView.getBoundingClientRect();state.co
 compareSlider.addEventListener('pointerdown',event=>{if(event.button!==0)return;event.preventDefault();compareDrag=event.pointerId;compareSlider.focus({preventScroll:true});compareSlider.setPointerCapture(event.pointerId);moveCompare(event)});
 compareSlider.addEventListener('pointermove',event=>{if(compareDrag===event.pointerId){event.preventDefault();moveCompare(event)}});
 for(const type of ['pointerup','pointercancel'])compareSlider.addEventListener(type,event=>{if(compareDrag!==event.pointerId)return;compareDrag=null;if(compareSlider.hasPointerCapture(event.pointerId))compareSlider.releasePointerCapture(event.pointerId)});
+// Two-finger touches have priority over Select/Create drawing. One-finger
+// gestures still use the existing canvas pointer tool until a pinch begins.
+const viewport=$('viewport');
+let pinchState=null;
+const pinch=createMobilePinch({
+  enabled:()=>window.matchMedia('(max-width:850px)').matches&&Boolean(state.master)&&!state.before,
+  onStart:({midpoint,distance})=>{
+    if(state.pointerBoxStart||state.drawing||state.panAnchor||state.transformDrag)pointerCancel();
+    state.pointerBoxPointerId=null;state.pointerBoxModifier=null;
+    window.MosaicSlimWand?.leave?.();
+    const rect=overlay.getBoundingClientRect();
+    pinchState={distance,zoom:state.zoom,
+      x:(midpoint.x-rect.left)/rect.width*canvas.width,
+      y:(midpoint.y-rect.top)/rect.height*canvas.height};
+    viewport.classList.add('is-pinching');
+  },
+  onMove:({midpoint,distance})=>{
+    if(!pinchState)return;
+    setZoom(pinchState.zoom*distance/pinchState.distance);
+    const rect=overlay.getBoundingClientRect();
+    viewport.scrollLeft+=rect.left+pinchState.x/canvas.width*rect.width-midpoint.x;
+    viewport.scrollTop+=rect.top+pinchState.y/canvas.height*rect.height-midpoint.y;
+  },
+  onEnd:()=>{pinchState=null;viewport.classList.remove('is-pinching')}
+});
+for(const type of ['pointerdown','pointermove','pointerup','pointercancel'])
+  viewport.addEventListener(type,event=>{
+    if(pinch.handle(event)){event.preventDefault();event.stopImmediatePropagation()}
+  },{capture:true,passive:false});
 // Touch and mouse drawing both use Pointer Events.
-for(const type of ['pointerdown','pointermove','pointerup','pointercancel'])$('viewport').addEventListener(type,{pointerdown:pointerDown,pointermove:pointerMove,pointerup:pointerUp,pointercancel:pointerCancel}[type]);
+for(const type of ['pointerdown','pointermove','pointerup','pointercancel'])
+  viewport.addEventListener(type,{pointerdown:pointerDown,pointermove:pointerMove,pointerup:pointerUp,pointercancel:pointerCancel}[type]);
 $('viewport').addEventListener('dblclick',e=>{if(e.target.closest('form,button,input,textarea,select'))return;if(state.tool==='cut'){e.preventDefault();window.MosaicObjectCreateCut?.endCut?.();return}if(state.tool==='lasso'&&state.lasso.length>=3){e.preventDefault();updateMaskWithLasso()}});
 window.addEventListener('keydown',onKeys);window.addEventListener('resize',()=>{if(window.innerWidth>730&&!inspectorPanel.classList.contains('is-collapsed'))setInspectorWidth(inspectorPanel.getBoundingClientRect().width);if(state.master)updateZoomFit();const form=$('quickAreaPromptForm');if(!form.classList.contains('hidden'))positionQuickPrompt(state.lastCanvasPointer)});
 for(const id of ['copyPromptBtn','copyPromptSecondary'])$(id).addEventListener('click',async()=>{try{await navigator.clipboard.writeText(promptText());toast('Prompt copied.')}catch{toast('Clipboard unavailable. Select prompt from the panel.')}});
-const viewport=$('viewport');viewport.addEventListener('pointerleave',()=>{window.MosaicRegions?.clearHover();window.MosaicSlimWand?.leave?.()});viewport.addEventListener('dragover',e=>{e.preventDefault();viewport.classList.add('dropping')});viewport.addEventListener('dragleave',()=>viewport.classList.remove('dropping'));viewport.addEventListener('drop',async e=>{e.preventDefault();viewport.classList.remove('dropping');const files=[...e.dataTransfer.files].filter(f=>f.type.startsWith('image/'));if(!state.master){if(files[0])await importReference(files[0]);if(files.length>1)await importVariants(files.slice(1))}else await importVariants(files)});
+viewport.addEventListener('pointerleave',()=>{window.MosaicRegions?.clearHover();window.MosaicSlimWand?.leave?.()});viewport.addEventListener('dragover',e=>{e.preventDefault();viewport.classList.add('dropping')});viewport.addEventListener('dragleave',()=>viewport.classList.remove('dropping'));viewport.addEventListener('drop',async e=>{e.preventDefault();viewport.classList.remove('dropping');const files=[...e.dataTransfer.files].filter(f=>f.type.startsWith('image/'));if(!state.master){if(files[0])await importReference(files[0]);if(files.length>1)await importVariants(files.slice(1))}else await importVariants(files)});
 viewport.addEventListener('pointerleave',()=>{brushPointer=null;brushCursor.hidden=true;hoverMaskEdge=null;updateMaskPointControls()});
 viewport.addEventListener('wheel',event=>{
   if(!state.master||event.target.closest('form,.mask-edit-controls'))return;
@@ -2529,6 +2568,6 @@ viewport.addEventListener('wheel',event=>{
   if(state.shapeStart)state.shapeEnd=canvasPoint(event,false);drawOverlay();
 },{passive:false});
 window.addEventListener('mosaic:keyconnected',()=>state.groups.forEach(autoClassifyGroup));
-window.MosaicCore = {materialEditSnapshot,bringObjectToFront,compactPatchMask,compactAllOptionMasks,fullPatchMask,expandPatchMask,selectionBounds,ensureSelectionMask,selectionContainsPoint,groupMaskCrop,compactOptionSource,expandOptionSource,sameMaskGeometry,shareMaterialOptionMask,shareSavedOptionMasks,detachSharedOptionMask,groupContainsPoint,appendGroupSelection,newGroup,newGroupFromCrop,matchingGroup,applyWandMask,svgNode,vectorLayer,drawVectorPaths,maskPathsFromRaster,maskPathsFromCrop,state,canvas,overlay,ctx,makeCanvas,uid,setProjectTitle,toast,message,promptText,loadFileToCanvas,setMaster,continueWithBase,upgradeBaseDraft,setSourcePreview,updateSourceActions,render,composeApprovedCanvas,renderGroups,drawPatch,selectTool,setMode,updateApplyButton,maskBoundingBox,assignGroup,resetSelection,updateSelectionOutline,trimUndo,updateMaskWithLasso,updateZoomFit,escapeHTML,categoryFromText,updateGroupCategory,optionNameFromPrompt,prepareSelectionGroup,groupMask,selectGroupMask,CATEGORIES,showQuickPrompt,hideQuickPrompt,createBlankRegion,moveOptionToGroup,displayedPatchMask,renderedPatchLayer,refreshGroupFootprint,invalidateDisplayedMask,attachGeneratedSelection,patchSelectionPaths,exactMaskBoundingBox,unwarpPatchSelection,patchControlPoints,displayedMaskPoint};
+window.MosaicCore = {materialEditSnapshot,bringObjectToFront,compactPatchMask,compactAllOptionMasks,fullPatchMask,expandPatchMask,selectionBounds,ensureSelectionMask,selectionContainsPoint,groupMaskCrop,compactOptionSource,expandOptionSource,sameMaskGeometry,shareMaterialOptionMask,shareSavedOptionMasks,detachSharedOptionMask,groupContainsPoint,appendGroupSelection,newGroup,newGroupFromCrop,matchingGroup,applyWandMask,svgNode,vectorLayer,drawVectorPaths,maskPathsFromRaster,maskPathsFromCrop,state,canvas,overlay,ctx,makeCanvas,uid,setProjectTitle,toast,message,promptText,loadFileToCanvas,setMaster,continueWithBase,upgradeBaseDraft,setSourcePreview,updateSourceActions,render,composeApprovedCanvas,renderGroups,drawPatch,selectTool,setMode,clearObjectSelection,updateApplyButton,maskBoundingBox,assignGroup,resetSelection,updateSelectionOutline,trimUndo,updateMaskWithLasso,updateZoomFit,escapeHTML,categoryFromText,updateGroupCategory,optionNameFromPrompt,prepareSelectionGroup,groupMask,selectGroupMask,CATEGORIES,showQuickPrompt,hideQuickPrompt,createBlankRegion,moveOptionToGroup,displayedPatchMask,renderedPatchLayer,refreshGroupFootprint,invalidateDisplayedMask,attachGeneratedSelection,patchSelectionPaths,exactMaskBoundingBox,unwarpPatchSelection,patchControlPoints,displayedMaskPoint};
 Object.assign(window.MosaicCore,{focusGroupInSidebar,chooseGroupOption,groupChoiceVersion,toggleComparison,canCreateSelection,releaseSourceTexture,releasePatchTexture});
 promptText();
