@@ -6,7 +6,7 @@ window.runObjectMapChecks=async function(){
   const nativeFetch=window.fetch,capture=Element.prototype.setPointerCapture;Element.prototype.setPointerCapture=()=>{};
   let maps=0,edits=0,sam=0,intent=0,release,hold=false,payload;
   window.fetch=async(path,options)=>{
-    if(path==='/api/ai/object-map')maps++;
+    if(path==='/api/ai/object-map'&&JSON.parse(options?.body||'{}').action!=='labels')maps++;
     if(path==='/api/ai/sam3')sam++;
     if(path==='/api/ai/object-intent')intent++;
     if(path==='/api/ai/edit'){edits++;payload=JSON.parse(options.body);const response=await nativeFetch(path,options);if(hold)await new Promise(resolve=>{release=resolve});return response}
