@@ -5,7 +5,7 @@ window.runGeneratedObjectMapChecks=async function(){
   let masters=0,maps=0,sam=0,releaseMaster,releaseMap,mapInput;
   window.fetch=async(path,options)=>{
     if(path==='/api/ai/master'){masters++;const answer=await native(path,options);await new Promise(resolve=>{releaseMaster=resolve});return answer}
-    if(path==='/api/ai/object-map'){maps++;mapInput=JSON.parse(options.body).image;const answer=await native(path,options);await new Promise(resolve=>{releaseMap=resolve});return answer}
+    if(path==='/api/ai/object-map'&&JSON.parse(options?.body||'{}').action!=='labels'){maps++;mapInput=JSON.parse(options.body).image;const answer=await native(path,options);await new Promise(resolve=>{releaseMap=resolve});return answer}
     if(path==='/api/ai/sam3')sam++;
     return native(path,options);
   };
