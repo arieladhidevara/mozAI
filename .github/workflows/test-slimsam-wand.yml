@@ -5,8 +5,13 @@ on:
       - 'app.js'
       - 'workspace-mobile.js'
       - 'workspace-mobile.css'
+      - 'workspace-ui.css'
+      - 'workspace-ui.js'
+      - 'auth.js'
+      - 'tests/mobile-composer-header.test.cjs'
       - 'mobile-pinch.mjs'
       - 'tests/mobile-interactions.test.mjs'
+      - 'tests/mobile-composer-header.test.cjs'
       - 'index.html'
       - 'styles.css'
       - 'slimsam-*'
@@ -32,6 +37,10 @@ on:
       - 'app.js'
       - 'workspace-mobile.js'
       - 'workspace-mobile.css'
+      - 'workspace-ui.css'
+      - 'workspace-ui.js'
+      - 'auth.js'
+      - 'tests/mobile-composer-header.test.cjs'
       - 'mobile-pinch.mjs'
       - 'tests/mobile-interactions.test.mjs'
       - 'index.html'
@@ -64,6 +73,8 @@ jobs:
           node --check app.js
           node --check mobile-pinch.mjs
           node --check workspace-mobile.js
+          node --check workspace-ui.js
+          node --check auth.js
           node --check auto-regions.js
           node --check regions.js
           node --check mask-progress.js
