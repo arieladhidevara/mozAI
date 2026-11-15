@@ -432,11 +432,11 @@ function selectAt(point,options={}){
   }
   if(!live&&(!labels||state.objectMapLocked)){
     if(busy){pendingClick={point:{...point},options};core.message('Object selection queued until the image map is ready.');}
-    else if(!options.append&&!options.subtract){core.resetSelection();core.render();}
+    else if(!options.append&&!options.subtract){core.clearObjectSelection?.();}
     return;
   }
   const id=idAt(point,live);
-  if(!id){if(!options.append&&!options.subtract){core.resetSelection();core.render()}return}
+  if(!id){if(!options.append&&!options.subtract)core.clearObjectSelection?.();return}
   core.ensureSelectionMask();
   const hasObjects=state.objectSelectionParts?.length;
   const mode=options.append&&hasObjects?'add':options.subtract&&hasObjects?'subtract':'new';core.setMode(mode);
