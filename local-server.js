@@ -39,6 +39,7 @@ const publicFiles = new Set([
   'auth.js',
   'key-vault.js',
   'workspace-ui.js',
+  'onboarding-guide.js',
   'canvas-workspace.js',
   'canvas-workspace.css',
   'design-copilot.js',

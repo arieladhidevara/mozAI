@@ -191,10 +191,10 @@ function updateSourceActions(){
   $('generateMasterBtn').textContent=generating?'Generating Master…':'✦ Generate Master from Base';
   $('welcomeBasePromptForm').classList.toggle('hidden',!firstImageOnly);
   $('welcomeContinueBtn').classList.toggle('hidden',!firstImageOnly);
-  $('welcomeTitle').textContent=firstImageOnly?'Base uploaded. What next?':'Start a project.';
+  $('welcomeTitle').textContent=firstImageOnly?'Image uploaded. What next?':'Start a project.';
   $('welcomeDescription').textContent=firstImageOnly
-    ?'Generate a Master from this Base, or choose Use Base to edit directly.'
-     :'Upload a Base image, or choose Load project from the project menu above.';
+    ?'Generate a render from this image, or choose Use Image to edit directly.'
+     :'Upload an image, or choose Load project from the project menu above.';
   $('editBaseBtn').classList.toggle('hidden',!state.reference);
   $('editMasterBtn').classList.toggle('hidden',!state.master);
   $('editPendingBtn').disabled=!state.pendingSourceId;

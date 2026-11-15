@@ -30,6 +30,8 @@ test('Gemini receives live images, labels, and persistent session without exposi
     };
     const result=await consult(base(),'test-key',{id:'v1_oldInteraction01',memory:'Keep furniture',lastTargetIds:['chair-1']});
     assert.equal(payload.previous_interaction_id,'v1_oldInteraction01');
+    assert.match(payload.system_instruction,/Reply in English by default/);
+    assert.match(payload.system_instruction,/only when the user explicitly asks/);
     assert.equal(payload.model,'gemini-3.5-flash-lite');
     assert.equal(payload.input[1].type,'image');
     assert.equal(payload.input[1].mime_type,'image/jpeg');

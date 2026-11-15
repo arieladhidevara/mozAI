@@ -368,7 +368,7 @@ async function execute(action,m){
 async function submit(event){
   event.preventDefault();event.stopImmediatePropagation();if(busy)return;
   const message=prompt.value.trim();if(!message)return;
-  if(!state.master){status.textContent='Upload a Base image first.';return}
+  if(!state.master){status.textContent='Upload an image first.';return}
   const requestRevision=revision,baseAtStart=state.master;
   busy=true;send.disabled=true;send.textContent='…';
   state.chatMessages.push({role:'user',text:message});prompt.value='';renderThread();status.textContent='Consulting on your design…';
@@ -389,7 +389,7 @@ async function submit(event){
       }else beginReview(m,plan.targetIds);
     }else{
       highlight(plan.targetIds);renderThread();
-      status.textContent=plan.targetIds.length?plan.targetIds.length+' objects highlighted':'Gemini · design advice ready';
+      status.textContent=plan.targetIds.length?plan.targetIds.length+' objects highlighted':'Design advice ready';
       if(plan.action==='group')group(plan.targetIds,plan.groupName);
     }
     // Image calls require the explicit Preview / Generate button below the advice.

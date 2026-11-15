@@ -196,3 +196,44 @@
 #quickPromptMorePanel{display:flex;flex-direction:column;gap:6px}
 #quickPromptMorePanel .geometry-mode-switcher:not([hidden]){display:contents!important}
 #quickPromptMorePanel label{order:0}#bringObjectToFrontBtn{order:1}#geometryRemoveBtn{order:2}
+
+/* Compact prompt: More expands this same surface to the right. */
+#quickAreaPromptForm.quick-area-prompt{width:320px!important;gap:6px;padding:9px!important;border-radius:11px!important}
+#quickAreaPromptForm .quick-area-title{height:16px;min-height:16px;font-size:10px}
+#quickPromptObjectName{font-size:10px}
+#quickAreaPromptInput{min-height:32px!important;height:32px!important;font-size:11px!important;padding:7px!important}
+#quickAreaPromptForm .prompt-input-row{gap:5px;padding:3px!important}
+#quickAreaPromptForm .quick-generate{min-height:30px!important;height:30px!important;min-width:68px!important;padding:6px 9px!important;font-size:10px!important}
+#quickAreaPromptForm .quick-generate::after{display:none!important}
+#quickAreaPromptForm .prompt-add-reference{width:24px!important;min-width:24px!important;height:26px!important;padding:0!important}
+#quickGroupOptions .quick-option{flex-basis:62px;width:62px;padding:4px;gap:3px;border-radius:7px}
+#quickGroupOptions .quick-option img{width:50px;height:29px}
+#quickGroupOptions .quick-option span{font-size:9px}
+#quickGroupOptions .quick-option-list{gap:5px;padding-bottom:4px}
+#quickAreaPromptForm.more-open{display:grid!important;grid-template-columns:minmax(0,1fr) 128px;width:458px!important;column-gap:9px}
+#quickAreaPromptForm.more-open>:not(#quickPromptMorePanel){grid-column:1;min-width:0}
+#quickAreaPromptForm #quickPromptMorePanel{position:static!important;inset:auto!important;grid-column:2;grid-row:1/span 6;align-self:stretch;width:auto;min-width:0;padding:2px 0 2px 9px;border:0;border-left:1px solid #ffffff20;border-radius:0;background:transparent;box-shadow:none;font-size:10px}
+#quickPromptMorePanel button{margin-top:3px;padding:6px;font-size:10px}
+#quickEditMode{padding:6px;font-size:10px}
+#quickAreaPromptForm.more-open .prompt-input-row{flex-wrap:wrap}
+#quickAreaPromptForm.more-open #quickAreaPromptInput{flex-basis:100%}
+@media(min-width:600px){#quickAreaPromptForm.more-open .prompt-input-row{flex-wrap:nowrap}#quickAreaPromptForm.more-open #quickAreaPromptInput{flex-basis:auto}}
+.moz-guide-overlay{position:fixed;inset:0;z-index:2147483000;pointer-events:auto}
+.moz-guide-ring{position:fixed;border:2px solid #c69aff;border-radius:10px;box-shadow:0 0 0 9999px #000b;pointer-events:none;transition:left .15s,top .15s,width .15s,height .15s}
+.moz-guide-card{position:fixed;width:300px;max-width:calc(100vw - 24px);padding:17px;border:1px solid #8f6cb0;background:#211b29;color:#f5efff;border-radius:13px;box-shadow:0 16px 60px #0009;box-sizing:border-box;font:13px/1.5 system-ui}
+.moz-guide-card h2{font-size:16px;margin:5px 0 8px}.moz-guide-card p{margin:0 0 15px;color:#c8bdd5}.moz-guide-count{font-size:10px;color:#ae9bc4}
+.moz-guide-actions{display:flex;align-items:center;gap:7px}.moz-guide-actions button{padding:7px 11px;background:#30263d;border:1px solid #705781;color:#eee;border-radius:7px;cursor:pointer}.moz-guide-actions .guide-skip{margin-right:auto;background:transparent;border-color:transparent;color:#b9a9c9}.moz-guide-actions .guide-next{background:#9562d6;color:#fff;border-color:#9562d6}.moz-guide-actions button:focus-visible{outline:2px solid #ead5ff;outline-offset:3px}
+
+@media(max-width:850px){
+ #mobileEditPane #quickAreaPromptForm{width:min(320px,100%)!important;display:flex!important;padding:9px!important}
+ #mobileEditPane #quickAreaPromptForm.more-open{width:100%!important;display:grid!important;grid-template-columns:minmax(0,1fr) 116px;gap:6px}
+ #mobileEditPane #quickAreaPromptForm .quick-area-title{min-height:16px!important;height:16px!important}
+ #mobileEditPane #quickAreaPromptForm .prompt-input-row{display:flex!important;gap:4px}
+ #mobileEditPane #quickAreaPromptForm #quickAreaPromptInput{min-height:36px!important;height:36px!important;max-height:70px;font-size:16px!important}
+ #mobileEditPane #quickAreaPromptForm .quick-generate{min-height:32px!important;height:32px!important;min-width:65px!important}
+ #mobileEditPane #quickAreaPromptForm .prompt-add-reference{min-height:28px!important;min-width:24px!important}
+ #mobileEditPane #quickAreaPromptForm .prompt-footer button{min-height:24px!important}
+ #mobileEditPane #quickAreaPromptForm #quickPromptMorePanel{grid-column:2!important;grid-row:1/span 6!important;position:static!important}
+}
+
+@media(max-width:850px){#mobileEditPane #quickAreaPromptForm:not(.more-open){width:min(320px,100%)!important}}
