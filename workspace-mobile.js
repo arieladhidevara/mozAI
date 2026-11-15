@@ -1,6 +1,5 @@
-/* iPhone-first three-zone workspace.
-   The bottom sheet has swipeable Groups, AI Edit and Settings views.
-   Reactivity is managed with a single matchMedia listener; editor state is untouched. */
+/* iPhone-first workspace: Groups and Assistant share a fixed-height dock.
+   Editing tools remain on the canvas. Safari's keyboard only moves the composer. */
 import './app.js';
 const $=id=>document.getElementById(id);
 const sidebar=$('inspectorPanel'),chat=$('compositionChat'),dock=chat?.parentElement;
@@ -82,7 +81,8 @@ function keyboard(){
   const vv=window.visualViewport,height=vv?.height||window.innerHeight,top=vv?.offsetTop||0;
   const isTyping=composerInput(),hidden=Math.max(0,restingHeight-(top+height));
   const open=Boolean(isTyping&&hidden>120);
-  if(!open&&!isTyping)restingHeight=window.innerHeight;
+  // Do not overwrite the baseline during keyboard-dismiss animation.
+  if(!open&&!isTyping&&hidden<90)restingHeight=window.innerHeight;
   root.style.setProperty('--moz-mobile-screen-height',Math.round(restingHeight)+'px');
   root.style.setProperty('--moz-mobile-visible-bottom',Math.round(top+height)+'px');
   root.classList.toggle('moz-keyboard-open',open);
