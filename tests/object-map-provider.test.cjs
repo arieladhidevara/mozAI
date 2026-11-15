@@ -31,3 +31,18 @@ test('instance instructions separate same-material neighbors and labels preserve
     assert.equal(calls[1].input[1].content[0].detail,'high');assert.match(calls[1].input[0].content[0].text,/concrete OBJECT NAME/);
   }finally{global.fetch=original}
 });
+
+test('per-instance mode skips the redundant per-palette naming request',async()=>{
+  const old=global.fetch,urls=[];
+  global.fetch=async url=>{
+    urls.push(String(url));
+    return Response.json({data:[{b64_json:png()}]});
+  };
+  try{
+    const request=req();request.body.labelMode='instances';
+    const result=await generateObjectMap(request);
+    assert.equal(urls.length,1,'Per-instance labeling should make its own later batches, not duplicate color ID names');
+    assert.deepEqual(result.legend,[]);
+    assert.equal(result.labelsAvailable,false);
+  }finally{global.fetch=old}
+});
