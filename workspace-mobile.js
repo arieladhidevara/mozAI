@@ -69,13 +69,35 @@ sidebar.addEventListener('touchend',event=>{
 },{passive:true});
 sidebar.addEventListener('touchcancel',()=>{touch=null},{passive:true});
 const viewport=window.visualViewport;
+let restingViewportHeight=viewport?.height||window.innerHeight;
+function composerInput(){
+  const focused=document.activeElement;
+  return focused?.matches?.('input,textarea,[contenteditable=true]')&&
+    (editPane.contains(focused)||mobileSettingsPane?.contains(focused));
+}
+function keepComposerVisible(){
+  const field=document.activeElement;
+  if(!mobile.matches||!field||!editPane.contains(field))return;
+  const panel=editPane.getBoundingClientRect(),input=field.getBoundingClientRect(),gap=9;
+  if(input.bottom>panel.bottom-gap)editPane.scrollTop+=input.bottom-panel.bottom+gap;
+  else if(input.top<panel.top+gap)editPane.scrollTop+=input.top-panel.top-gap;
+}
 function keyboard(){
   if(!mobile.matches){document.documentElement.classList.remove('moz-keyboard-open');return;}
-  const open=Boolean(viewport&&window.innerHeight-viewport.height>180&&
-    document.activeElement?.matches?.('input,textarea,[contenteditable=true]'));
+  const focused=composerInput(),height=viewport?.height||window.innerHeight;
+  if(!focused)restingViewportHeight=Math.max(height,restingViewportHeight);
+  const lost=Math.max(restingViewportHeight-height,window.innerHeight-height-(viewport?.offsetTop||0));
+  const open=Boolean(focused&&lost>115);
   document.documentElement.classList.toggle('moz-keyboard-open',open);
+  if(open)requestAnimationFrame(keepComposerVisible);
 }
 viewport?.addEventListener('resize',keyboard);
+editPane.addEventListener('focusin',event=>{
+  if(!mobile.matches||!event.target.matches('input,textarea'))return;
+  if(current!=='ai')activate('ai');
+  requestAnimationFrame(keepComposerVisible);
+});
+editPane.addEventListener('focusout',()=>requestAnimationFrame(keyboard));
 window.addEventListener('orientationchange',()=>{
   requestAnimationFrame(()=>{updateLayout();keyboard();if(window.MosaicCore.state.master)window.MosaicCore.updateZoomFit();});
 });
@@ -237,15 +259,24 @@ mobile.addEventListener('change',()=>{
     }
   }
 });
+let lastMobileWidth=window.innerWidth;
 function updateVisibleHeight(){
   const vv=window.visualViewport;
   document.documentElement.style.setProperty('--moz-mobile-screen-height',
     Math.round(mobile.matches&&vv?vv.height:window.innerHeight)+'px');
-  if(mobile.matches&&window.MosaicCore?.state.master)
+  keyboard();
+  // Opening the virtual keyboard must not reset zoom or recenter the canvas.
+  if(!mobile.matches)return;
+  const resizedWidth=lastMobileWidth!==window.innerWidth;
+  lastMobileWidth=window.innerWidth;
+  if(resizedWidth&&!composerInput()&&window.MosaicCore?.state.master)
     requestAnimationFrame(()=>window.MosaicCore.updateZoomFit());
 }
 window.visualViewport?.addEventListener('resize',updateVisibleHeight);
-window.addEventListener('orientationchange',updateVisibleHeight);
+window.addEventListener('orientationchange',()=>{
+  restingViewportHeight=window.visualViewport?.height||window.innerHeight;
+  requestAnimationFrame(updateVisibleHeight);
+});
 mobile.addEventListener('change',updateVisibleHeight);
 updateVisibleHeight();
 window.MosaicMobile={activate,active:()=>current,isMobile:()=>mobile.matches,
@@ -253,6 +284,14 @@ window.MosaicMobile={activate,active:()=>current,isMobile:()=>mobile.matches,
   openAI:()=>activate('ai'),expand:toggleExpand};
 
 // Selection modes are docked outside #tools on mobile, so retain their click behavior.
+
+const groupList=$('groupList');
+// Tapping empty space in the Management sheet clears its focus and canvas preview.
+// Group cards, options, category controls and text fields retain their own actions.
+groupList?.addEventListener('click',event=>{
+  if(!mobile.matches||event.target.closest('.region-group,.object-category-head,button,input,textarea,select,[data-region-action]'))return;
+  window.MosaicCore?.clearObjectSelection?.();
+});
 selectionModes?.addEventListener('click',event=>{
   if(!mobile.matches)return;
   const button=event.target.closest('[data-mode]');
