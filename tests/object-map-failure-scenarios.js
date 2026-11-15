@@ -12,6 +12,7 @@ window.runObjectMapFailureChecks=async function(){
     window.MosaicAuth.isReady=()=>connected;window.MosaicAuth.restore=async()=>connected;
     window.MosaicAuth.request=async(path,body)=>{
       if(path!=='/api/ai/object-map')return saved.request(path,body);
+      if(body?.body?.action==='labels')return {objects:[]};
       const call=++calls;if(fail)throw Object.assign(Error('Object-map quota reached.'),{status:429});
       if(hold&&call===1)await new Promise(resolve=>{release=resolve});return response(call===1?'old door':'new door');
     };
