@@ -62,7 +62,8 @@ export function makeInstanceContactSheet({source,raster,entries,labels,makeCanva
         const p=(y*dw+x)*4;mask.data[p]=17;mask.data[p+1]=19;mask.data[p+2]=29;mask.data[p+3]=174;
       }
     }
-    ctx.putImageData(mask,dx,dy);
+    const overlay=makeCanvas(dw,dh);overlay.getContext('2d').putImageData(mask,0,0);
+    ctx.drawImage(overlay,dx,dy);
     ctx.strokeStyle='#d7d8dc';ctx.lineWidth=1;ctx.strokeRect(left+5,top+31,tileW-10,imageH+2);
   }
   return sheet;
