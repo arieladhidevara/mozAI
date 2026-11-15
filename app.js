@@ -2415,19 +2415,33 @@ $('groupList').addEventListener('click',groupEvent);
 $('tools').addEventListener('click',e=>{const tool=e.target.closest('[data-tool]'),mode=e.target.closest('[data-mode]');if(tool){if(tool.dataset.tool==='select'){state.maskEditOnly=false;renderGroups()}selectTool(tool.dataset.tool);}if(mode)setMode(mode.dataset.mode)});
 $('brushSize').addEventListener('input',e=>{state.brushSize=Number(e.target.value);$('brushValue').textContent=e.target.value;refreshBrushCursor()});
 $('brushIntensity').addEventListener('input',e=>{state.brushIntensity=Number(e.target.value);$('brushIntensityValue').textContent=e.target.value+'%';refreshBrushCursor()});
-const projectNameInput=$('projectNameInput');
-const projectMenu=$('projectMenu');
-projectMenu.addEventListener('toggle',()=>{
-  if(projectMenu.open)projectNameInput.value=$('projectName').textContent;
+const projectNameInput=$('projectNameInput'),projectMenu=$('projectMenu');
+const projectRenameToggle=$('projectRenameToggle'),projectHeader=$('projectMenu').parentElement;
+let renameCancelled=false;
+function finishProjectRename(){
+  if(projectNameInput.hidden)return;
+  const name=projectNameInput.value.trim();
+  projectHeader.classList.remove('project-editing');
+  projectNameInput.hidden=true;
+  projectRenameToggle.setAttribute('aria-label','Rename project');
+  if(!renameCancelled&&name&&name!==state.projectTitle){
+    setProjectTitle(name,true);
+    window.MosaicRecovery?.markChanged?.();
+  }
+  renameCancelled=false;
+}
+projectRenameToggle.addEventListener('click',()=>{
+  if(!projectNameInput.hidden){projectNameInput.blur();return}
+  projectMenu.open=false;
+  projectNameInput.value=state.projectTitle||$('projectName').textContent;
+  projectNameInput.hidden=false;
+  projectHeader.classList.add('project-editing');
+  projectNameInput.focus({preventScroll:true});projectNameInput.select();
 });
-$('projectRenameForm').addEventListener('submit',event=>{
-  event.preventDefault();
-  if(!projectNameInput.value.trim())return;
-  setProjectTitle(projectNameInput.value,true);
-  projectMenu.open=false;projectMenu.querySelector('summary').focus();
-});
+projectNameInput.addEventListener('blur',finishProjectRename);
 projectNameInput.addEventListener('keydown',event=>{
-  if(event.key==='Escape'){event.preventDefault();event.stopPropagation();projectMenu.open=false;projectMenu.querySelector('summary').focus()}
+  if(event.key==='Enter'){event.preventDefault();projectNameInput.blur()}
+  else if(event.key==='Escape'){event.preventDefault();event.stopPropagation();renameCancelled=true;projectNameInput.blur()}
 });
 
 $('commitBtn').addEventListener('click',applySelection);

@@ -65,10 +65,11 @@ test('mobile management selection shows overlay and empty clicks clear focused r
 test('keyboard focus retains mobile composer and does not refit canvas on visual viewport resize',()=>{
   const mobile=readFileSync(new URL('../workspace-mobile.js',import.meta.url),'utf8');
   const css=readFileSync(new URL('../workspace-mobile.css',import.meta.url),'utf8');
-  assert.match(mobile,/function keepComposerVisible\(\)/);
+  assert.match(mobile,/function keyboard\(\)/);
   assert.match(mobile,/viewport\?\.addEventListener\('resize',keyboard\)/);
-  assert.match(mobile,/if\(resizedWidth&&!composerInput\(\)&&window\.MosaicCore\?\.state\.master\)/);
-  assert.match(css,/html\.moz-keyboard-open #inspectorPanel \.mobile-bottom-tabs/);
-  assert.match(css,/html\.moz-keyboard-open #mobileEditPane \.mobile-ai-choices/);
+  assert.match(mobile,/--moz-mobile-visible-bottom/);
+  assert.match(mobile,/No fit\/recenter or canvas resize on keyboard-only changes/);
+  assert.match(css,/html\.moz-keyboard-open #inspectorPanel>\.mobile-bottom-tabs/);
+  assert.match(css,/html\.moz-keyboard-open #inspectorPanel\s*\{\s*position:fixed!important/);
   assert.match(css,/\.workspace \.canvas-viewport\{[\s\S]*touch-action:none!important/);
 });
