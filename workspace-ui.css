@@ -195,3 +195,33 @@
 }
 .quick-area-prompt .quick-option img{max-width:100%;width:34px;height:24px}
 .quick-area-prompt .quick-option span{font-size:9px}
+
+
+/* Quiet header: project name remains a menu; pencil edits inline and commits
+   on blur. The OpenAI connection control keeps full accessibility via tooltip. */
+.header-start .project-rename-toggle{
+  width:30px;height:34px;min-width:30px;display:grid;place-items:center;
+  padding:0;border:0;border-radius:7px;background:transparent;
+  color:#a79cb5;cursor:pointer;
+}
+.header-start .project-rename-toggle:hover{background:#ffffff10;color:#f2e5ff}
+.header-start .project-rename-toggle:focus-visible{outline:2px solid #b3a0de;outline-offset:2px}
+.header-start .project-rename-toggle svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.header-start.project-editing #projectMenu{display:none!important}
+.header-start .project-name-input:not([hidden]){
+  display:block;width:clamp(110px,22vw,260px);min-width:0;max-width:50vw;
+  height:34px;font-size:13px;padding:5px 8px;border:1px solid #b3a0de;
+  background:#24212b;color:#f7f3fa;border-radius:7px;outline:none;
+}
+.header-start .project-name-input[hidden]{display:none!important}
+.topbar #apiKeyStatusBtn{
+  display:grid!important;place-items:center!important;width:35px!important;
+  min-width:35px!important;height:35px!important;padding:0!important;
+}
+.topbar #apiKeyStatusBtn svg{display:block;width:18px;height:18px}
+.topbar #apiKeyStatusBtn[data-connected=true]{color:#c3b1e9!important;border-color:#ad96df55!important}
+@media(max-width:850px){
+  .header-start .project-rename-toggle{width:28px;min-width:28px;height:44px}
+  .header-start .project-name-input:not([hidden]){width:min(38vw,180px);height:44px;font-size:16px}
+  .topbar #apiKeyStatusBtn{width:38px!important;min-width:38px!important;height:44px!important}
+}
