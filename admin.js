@@ -15,7 +15,13 @@ function invitationForm(host){
       const values=Object.fromEntries(new FormData(form)),result=await account.request('/api/admin',{method:'POST',body:{action:'invite',...values}});
       const box=element('div',undefined,'invitation-link'),input=element('input');input.readOnly=true;input.value=location.origin+'/#invite='+result.token;input.setAttribute('aria-label','New invitation link');
       const copy=element('button','Copy link','btn btn-outline');copy.type='button';copy.onclick=async()=>{try{await navigator.clipboard.writeText(input.value);copy.textContent='Copied'}catch{input.select()}};box.append(input,copy);
-      await load();$('adminContent').prepend(box,element('p','Copy this link now. It is shown only once.','usage-note'));
+      const status=result.delivery?.status;
+      const note=status==='sent'
+        ?'Invitation email submitted to '+values.email+'. The link is shown only once.'
+        :status==='not_requested'
+          ?'No email specified. Copy and share this link now. It is shown only once.'
+          :'Email was not sent. Copy and share this link manually. It is shown only once.';
+      await load();$('adminContent').prepend(box,element('p',note,'usage-note'));
     }catch(error){$('adminError').textContent=error.message}finally{submit.disabled=false}
   };
 }
