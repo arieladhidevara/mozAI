@@ -31,7 +31,7 @@ test('legal pages and security headers are present',()=>{
 test('benchmark and scene chat API routes are allowed by the browser request guard',()=>{
   const fs=require('node:fs'),path=require('node:path');
   const code=fs.readFileSync(path.join(__dirname,'../account.js'),'utf8');
-  const routes=['benchmark-object-map','chat','scene-intent'];
+  const routes=['benchmark-object-map','chat','scene-intent','object-labels'];
   const gate=code.match(/if\(!\/(\^\\\/api\\\/.*)\/\.test\(path\)\)/)?.[1]||'';
   for(const route of routes)assert.ok(gate.includes(route),route+' must be allowed through the client API gate');
 });
