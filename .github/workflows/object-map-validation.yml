@@ -4,6 +4,9 @@ on:
     branches: [main]
     paths:
       - 'object-map.js'
+      - 'object-instance-labels.mjs'
+      - 'lib/object-instance-label-handler.js'
+      - 'tests/object-instance-labels.test.mjs'
       - 'object-map-utils.mjs'
       - 'object-map-cleanup.mjs'
       - 'object-map-geometry.mjs'
@@ -15,6 +18,9 @@ on:
   pull_request:
     paths:
       - 'object-map.js'
+      - 'object-instance-labels.mjs'
+      - 'lib/object-instance-label-handler.js'
+      - 'tests/object-instance-labels.test.mjs'
       - 'object-map-utils.mjs'
       - 'object-map-cleanup.mjs'
       - 'object-map-geometry.mjs'
@@ -33,5 +39,7 @@ jobs:
           node-version: '22'
       - run: npm ci
       - run: node --check object-map.js
+      - run: node --check object-instance-labels.mjs
+      - run: node --check lib/object-instance-label-handler.js
       - run: node --check object-map-utils.mjs
-      - run: node --test tests/object-map-cleanup.test.mjs tests/object-map.test.mjs tests/object-map-provider.test.cjs
+      - run: node --test tests/object-map-cleanup.test.mjs tests/object-map.test.mjs tests/object-map-provider.test.cjs tests/object-instance-labels.test.mjs
