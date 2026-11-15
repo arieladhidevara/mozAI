@@ -1,5 +1,6 @@
 import './app.js';
 import './object-management.js';
+import {orderedSceneGroups} from './object-mask-utils.mjs';
 import {PALETTE,decodeColors,idsOverlappingShape,labelAt,CATEGORIES,objectMapSize} from './object-map-utils.mjs';
 import {CLEANUP_VERSION} from './object-map-cleanup.mjs';
 import {cropObjectLabel} from './object-mask-crop.mjs';
@@ -35,12 +36,12 @@ function invalidateHitIndex(){hitIndex=null;hoverId=0;hoverMask=null;preview.hid
 function indexedObjects(){
   if(hitIndex&&hitIndex.groups===state.groups&&hitIndex.count===state.groups.length&&hitIndex.width===canvas.width&&hitIndex.height===canvas.height)return hitIndex;
   const byId=new Map(),dynamic=[];
-  for(const [order,group] of state.groups.entries()){
-    if(group.mergedInto||group.objectMapBatch||group.objectRemoved)continue;
+  for(const [order,group] of orderedSceneGroups(state.groups).entries()){
+    if(group.mergedInto||group.objectMapBatch||(group.objectRemoved&&!window.MosaicReconstruction?.isRemovedRegion(group)))continue;
     if(group.objectMapKey===state.objectMap?.sourceKey&&group.objectMapInstanceId)byId.set(group.objectMapInstanceId,group);
     // Prepared, unedited objects belong to the flat ID raster. Index only
     // moved, shape-edited and manually created objects as spatial overrides.
-    if(!group.mapPrepared||group.active||group.objectOriginal||group.footprint)
+    if(group.reconstructionEventId||group.reconstructionExpanded||!group.mapPrepared||group.active||group.objectOriginal||group.footprint||Number.isFinite(group.frontStackOrder))
       dynamic.push({group,order,bounds:group.area});
   }
   hitIndex={groups:state.groups,count:state.groups.length,width:canvas.width,height:canvas.height,
@@ -196,7 +197,7 @@ function compactObjectPart(group){
   return {objectKey:group.objectMapObjectKey||group.id,
     instanceId:group.objectMapInstanceId||null,category:group.category,label:group.name,
     mapKey:group.objectMapKey||'manual',mask:null,maskCrop:crop,
-    paths:patch?core.patchSelectionPaths(patch):group.maskPaths||[]};
+    paths:group.reconstructionExpanded?[]:patch?core.patchSelectionPaths(patch):group.maskPaths||[]};
 }
 function drawPartMask(context,part){
   if(part.maskCrop?.mask)context.drawImage(part.maskCrop.mask,part.maskCrop.x,part.maskCrop.y);
@@ -207,7 +208,7 @@ function partsOverlappingMask(mask){
   if(!bounds)return [];
   const selected=new Map();
   const remember=group=>{
-    if(!group||group.mergedInto||group.objectRemoved||group.objectMapBatch)return;
+    if(!group||group.mergedInto||(group.objectRemoved&&!window.MosaicReconstruction?.isRemovedRegion(group))||group.objectMapBatch)return;
     const part=compactObjectPart(group);
     if(part)selected.set(group.id,part);
   };
@@ -228,7 +229,7 @@ function partsOverlappingMask(mask){
   const candidates=labels?index.grid.candidatesInBox(bounds):
     state.groups.map((group,order)=>({group,order,bounds:group.area}));
   for(const {group} of candidates){
-    if(group.mergedInto||group.objectMapBatch||group.objectRemoved)continue;
+    if(group.mergedInto||group.objectMapBatch||(group.objectRemoved&&!window.MosaicReconstruction?.isRemovedRegion(group)))continue;
     const crop=core.groupMaskCrop(group);
     if(!crop?.mask)continue;
     const x=Math.max(bounds.x,crop.x),y=Math.max(bounds.y,crop.y);
@@ -440,12 +441,21 @@ function selectAt(point,options={}){
   const hasObjects=state.objectSelectionParts?.length;
   const mode=options.append&&hasObjects?'add':options.subtract&&hasObjects?'subtract':'new';core.setMode(mode);
   const part=live?compactObjectPart(live):partForId(id);if(!part)return;
+  const owner=state.groups.find(g=>g.id===state.draftGroupId);
+  if(mode==='add'&&live&&window.MosaicReconstruction?.isRemovedRegion(live)){
+    const area=makeCanvas(canvas.width,canvas.height);drawPartMask(area.getContext('2d'),part);
+    if(window.MosaicReconstruction.claim(owner,area)){core.selectGroupMask(owner,{showOutline:true});core.renderGroups();core.render();leave();return;}
+  }
   operation={parts:snapshotSelection(),picked:[part]};picking=true;pickingIds=[id];pickingMode=mode;state.maskEditOnly=false;state.selectionTargetPatchId=null;state.draftGroupId=null;
   const selection=makeCanvas(canvas.width,canvas.height);drawPartMask(selection.getContext('2d'),part);
   core.applyWandMask(selection);picking=false;leave();
 }
 function selectObject(object,{append=false}={}){
   if(!append){core.selectGroupMask(object,{showOutline:true});return}
+  const owner=state.groups.find(g=>g.id===state.draftGroupId);
+  if(window.MosaicReconstruction?.isRemovedRegion(object)&&window.MosaicReconstruction.claim(owner,core.groupMask(object))){
+    core.selectGroupMask(owner,{showOutline:true});core.renderGroups();core.render();return;
+  }
   core.ensureSelectionMask();
   const part=compactObjectPart(object),mode=append&&state.objectSelectionParts?.length?'add':'new';operation={parts:snapshotSelection(),picked:[part]};picking=true;pickingMode=mode;state.selectionTargetPatchId=null;state.draftGroupId=null;state.selectedPatchId=null;state.maskEditOnly=false;core.setMode(mode);const selection=makeCanvas(canvas.width,canvas.height);drawPartMask(selection.getContext('2d'),part);core.applyWandMask(selection);picking=false}
 function invalidateBase(){rejectPrepared(Error('Original Object Map invalidated.'));serial++;busy=false;pendingBase=state.master;attemptedBase=pendingBase;labels=null;state.objectMap=null;state.objectMapSelection=null;if(state.master)delete state.objectMaps?.[sourceKey(state.master)];leave();window.MosaicMaskProgress?.hide('objects');update('Image changed · prepare objects again',true)}

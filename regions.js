@@ -30,7 +30,7 @@ function decorate(){
       const option=document.createElement('option');option.value=category;option.textContent=category==='Region'?'Uncategorized':category;
       option.selected=category===(g.category||'Region');select.append(option);
     }
-    details.append(select,makeButton('✦','identify','Identify object with AI'),makeButton('×','remove-group','Delete object and its options'));
+    details.append(select,makeButton('✦','identify','Identify object with AI'),makeButton('×','remove-group','Remove object from image'));
     head.after(details);
     for(const row of section.querySelectorAll('.variant-row[data-patch]')){
       if(row.dataset.patch==='master')continue;
@@ -133,13 +133,9 @@ function handleGroupEvent(e){
       return true;
     }
     if(action.dataset.regionAction==='remove-group'){
-      if(window.confirm('Delete '+group.name+' and all its options?')){
-        for(const id of group.patchIds)state.patches.delete(id);
-        state.groups=state.groups.filter(g=>g!==group);
-        if(state.draftGroupId===group.id)core.resetSelection();
-        if(hovering===group.id)clearHover();
-        renderGroups();render();
-      }
+      if(group.objectRemoved){core.toast('Choose Original or a previous Option to restore this object.');return true;}
+      selectGroupMask(group);
+      void window.MosaicGeometryEdit?.generate('',[],'remove');
       return true;
     }
     if(action.dataset.regionAction==='identify'){

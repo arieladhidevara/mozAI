@@ -266,7 +266,9 @@ async function loadProjectFile(file,{recovery=false}={}){
   finally{fileBusy=false;button.disabled=false;button.innerHTML=old}
 }
 $('saveProjectBtn').addEventListener('click',()=>void saveProject());
-$('openProjectBtn').addEventListener('click',()=>$('projectOpenInput').click());
+$('openProjectBtn').addEventListener('click',()=>{
+  if(!window.MosaicRecovery?.offerRecovery?.())$('projectOpenInput').click();
+});
 $('projectOpenInput').addEventListener('change',event=>{
   const file=event.target.files?.[0];event.target.value='';
   if(file)void loadProjectFile(file);

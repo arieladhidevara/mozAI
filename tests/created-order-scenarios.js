@@ -1,0 +1,75 @@
+// Exercise actual compositing, pointer picking, controls, history and .moz reload.
+window.runCreatedOrderChecks=async function(){
+  const core=window.MosaicCore,{state,canvas,makeCanvas}=core;
+  const checks=[],assert=(ok,message)=>{if(!ok)throw Error(message)};
+  const rgba=(image,x,y)=>[...image.getContext('2d').getImageData(x,y,1,1).data].join(',');
+  const mask=(x,y,w,h)=>{const c=makeCanvas(640,480),ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(x,y,w,h);return c};
+  const base=makeCanvas(640,480);base.getContext('2d').fillStyle='#eee';base.getContext('2d').fillRect(0,0,640,480);
+  state.reference=base;core.setMaster(base,'Created object order',false);
+  const addFixed=(name,color,area)=>{
+    const shape=mask(...area),group=core.newGroup(shape,name),id=core.uid('fixed'),source=makeCanvas(640,480);
+    source.getContext('2d').fillStyle=color;source.getContext('2d').fillRect(...area);
+    state.sources.set(id,{id,canvas:source});
+    state.patches.set(id,{id,groupId:group.id,sourceId:id,mask:shape,bbox:core.exactMaskBoundingBox(shape),maskPaths:core.maskPathsFromRaster(shape)});
+    group.patchIds=[id];group.active=id;core.refreshGroupFootprint(group);return group;
+  };
+  const wall=addFixed('Existing wall','#c6b4a0',[30,30,550,400]);
+  const desk=addFixed('Existing desk','#554433',[50,360,460,40]);
+  wall.objectBehind=[desk.id];
+  const fixedRelations=JSON.stringify([wall.objectBehind,desk.objectBehind]);
+  const addCreated=(name,color,area)=>{
+    const group=window.MosaicObjectCreateCut.create(mask(...area),name),patch=state.patches.get(group.active),source=state.sources.get(patch.sourceId);
+    source.canvas.getContext('2d').fillStyle=color;source.canvas.getContext('2d').fillRect(...area);
+    patch.createObject=true;core.invalidateDisplayedMask(patch,{geometryChanged:false});core.refreshGroupFootprint(group);return group;
+  };
+  const red=addCreated('Created red','#ee3344',[140,130,190,190]);
+  const blue=addCreated('Created blue','#3366ee',[220,170,190,190]);
+  core.render();
+  assert(JSON.stringify([wall.objectBehind,desk.objectBehind])===fixedRelations,'Create rewrote an existing object depth relationship');
+  assert(rgba(core.composeApprovedCanvas(),250,220)==='51,102,238,255','Most recent created object is not initially in front');
+  const fixedPixels=[rgba(core.composeApprovedCanvas(),70,70),rgba(core.composeApprovedCanvas(),80,380)];
+  const originalGroups=state.groups.slice(),originalGeometry=JSON.stringify([...state.patches.values()].map(p=>[p.id,p.bbox,p.corners]));
+  const originalMasks=new Map([...state.patches].map(([id,p])=>[id,p.mask]));
+  core.selectGroupMask(red,{showOutline:true});core.showQuickPrompt(null,true,false);
+  const button=document.getElementById('bringObjectToFrontBtn');
+  assert(button&&!button.hidden&&button.dataset.group===red.id,'Created object has no Bring to front control');
+  button.click();
+  assert(rgba(core.composeApprovedCanvas(),250,220)==='238,51,68,255','Bring to front failed to change the overlap pixels');
+  assert(window.MosaicObjectMap.hitTest({x:250,y:220})===red,'Pointer still picks the covered object');
+  assert(state.groups.every((group,i)=>group===originalGroups[i]),'Bring to front reordered original Group storage');
+  assert(JSON.stringify([...state.patches.values()].map(p=>[p.id,p.bbox,p.corners]))===originalGeometry,'Bring to front changed object position, scale or perspective');
+  assert([...state.patches].every(([id,p])=>p.mask===originalMasks.get(id)),'Bring to front rewrote a selection mask');
+  assert(JSON.stringify([wall.objectBehind,desk.objectBehind])===fixedRelations,'Bring to front changed existing depth relationships');
+  assert(fixedPixels.join('|')===[rgba(core.composeApprovedCanvas(),70,70),rgba(core.composeApprovedCanvas(),80,380)].join('|'),'Existing scene pixels changed');
+  checks.push('Bring to front changes only Create overlap, with geometry, masks and original scene intact');
+  checks.push('Pointer picking follows the visible created object order');
+  document.getElementById('undoBtn').click();
+  assert(rgba(core.composeApprovedCanvas(),250,220)==='51,102,238,255','Undo did not restore created object order');
+  assert(window.MosaicObjectMap.hitTest({x:250,y:220})===blue,'Undo left a stale pointer hit index');
+  document.getElementById('redoBtn').click();
+  assert(rgba(core.composeApprovedCanvas(),250,220)==='238,51,68,255','Redo did not restore created object order');
+  checks.push('Undo and Redo restore rendering and pointer selection');
+  core.selectGroupMask(wall,{showOutline:true});core.showQuickPrompt(null,true,false);
+  assert(!document.getElementById('bringObjectToFrontBtn').hidden,'Existing scene object has no Bring to front control');
+  state.expandedObjectId=blue.id;core.renderGroups();
+  const sidebar=document.querySelector('[data-action="bring-object-to-front"][data-group="'+blue.id+'"]');
+  assert(sidebar,'Expanded created object has no sidebar action');sidebar.click();
+  assert(rgba(core.composeApprovedCanvas(),250,220)==='51,102,238,255','Sidebar Bring to front did not work');
+  checks.push('Controls target one object in the prompt and expanded object');
+  // A later-created object starts above the current front, rather than below a
+  // previously raised rank. Stale legacy depth links cannot overrule the rank.
+  const green=addCreated('Created green','#33bb66',[260,210,150,150]);
+  green.objectBehind=[red.id];
+  core.render();
+  assert(rgba(core.composeApprovedCanvas(),280,240)==='51,187,102,255','A new Create did not start in front');
+  core.bringObjectToFront(red.id);
+  assert(rgba(core.composeApprovedCanvas(),280,240)==='238,51,68,255','Legacy relationships overruled Create order');
+  checks.push('New Create starts in front and legacy relations cannot override the chosen order');
+  const expected=core.composeApprovedCanvas().toDataURL(),saved=await window.MosaicProjects.buildProjectData();
+  assert(await window.MosaicProjects.loadProjectFile(new File([JSON.stringify(saved)],'order.moz'),{recovery:true}),'Saved project failed to reload');
+  assert(core.composeApprovedCanvas().toDataURL()===expected,'Saved project lost created order or pixels');
+  const restoredRed=state.groups.find(g=>g.id===red.id);
+  core.selectGroupMask(restoredRed,{showOutline:true});core.showQuickPrompt(null,true,false);
+  checks.push('Save and Load project preserve Create order and the exact composition');
+  return {passed:checks.length,checks};
+};

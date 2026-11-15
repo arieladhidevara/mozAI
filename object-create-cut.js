@@ -2,6 +2,7 @@
    Created masks are new foreground object identities, never a selection of an existing ID. */
 import './app.js';
 import {splitMaskByStroke} from './mask-cut.mjs';
+import {nextCreatedOrder} from './object-mask-utils.mjs';
 const core=window.MosaicCore,{state,canvas,makeCanvas}=core;
 const clone=source=>{const out=makeCanvas(source.width,source.height);out.getContext('2d').drawImage(source,0,0);return out;};
 function binary(mask){
@@ -15,31 +16,14 @@ function raster(bits){
   for(let i=0;i<bits.length;i++)if(bits[i])data.data.fill(255,i*4,i*4+4);
   ctx.putImageData(data,0,0);return out;
 }
-function overlappingGroupIds(mask){
-  const small=makeCanvas(256,Math.max(1,Math.round(256*canvas.height/canvas.width)));
-  const ctx=small.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=false;ctx.drawImage(mask,0,0,small.width,small.height);
-  const target=ctx.getImageData(0,0,small.width,small.height).data;
-  return state.groups.filter(g=>!g.mergedInto&&!g.objectMapBatch&&!g.objectRemoved).filter(g=>{
-    const frame=makeCanvas(small.width,small.height),c=frame.getContext('2d',{willReadFrequently:true});
-    c.imageSmoothingEnabled=false;c.drawImage(core.groupMask(g),0,0,frame.width,frame.height);
-    const pixels=c.getImageData(0,0,frame.width,frame.height).data;
-    for(let p=3;p<pixels.length;p+=4)if(pixels[p]>=128&&target[p]>=128)return true;
-    return false;
-  }).map(g=>g.id);
-}
 function registerForeground(mask,name='Created object'){
   const bbox=core.exactMaskBoundingBox(mask);if(!bbox)throw Error('Draw an area inside the image.');
-  const behind=overlappingGroupIds(mask);
   const group=core.newGroup(mask,'Region');
   group.objectMapKey='manual';group.objectMapObjectKey=core.uid('manual_object');
   group.objectId=group.id;group.mapPrepared=true;group.manualName=true;
-  group.objectName=group.name=name;group.objectBehind=[...behind];
+  group.objectName=group.name=name;group.objectBehind=[];
   group.createdLocally=true;group.collectionId=null;
-  // An object drawn later is ABOVE every object it overlaps; place its ID
-  // in the behind object's scene relationship, not the other way around.
-  group.objectBehind=[];
-  for(const id of behind){const covered=state.groups.find(item=>item.id===id);if(covered)
-    covered.objectBehind=[...new Set([...(covered.objectBehind||[]),group.id])];}
+  group.createdStackOrder=nextCreatedOrder(state.groups);
   const sourceId=core.uid('create_source'),patchId=core.uid('create_option');
   // The placement guide should NEVER copy pixels from objects beneath it.
   // The new foreground starts empty; the AI PNG provides its RGBA pixels.
@@ -128,6 +112,11 @@ function cut(){
     child.objectMapKey='manual';child.objectMapObjectKey=core.uid('cut_object');
     child.objectId=child.id;child.mapPrepared=true;child.cutParentId=group.id;
     child.collectionId=group.collectionId||null;
+    if(group.createdLocally||group.createdViaAI){
+      child.createdLocally=group.createdLocally;child.createdViaAI=group.createdViaAI;
+      child.createdStackOrder=group.createdStackOrder;
+    }
+    if(Number.isFinite(group.frontStackOrder))child.frontStackOrder=group.frontStackOrder;
     child.objectBehind=[...(group.objectBehind||[])];
     let active=null;
     for(const oldId of group.patchIds){

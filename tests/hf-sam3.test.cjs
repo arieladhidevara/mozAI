@@ -91,3 +91,8 @@ test('Auto Create calls only the configured Space with one image',async()=>{
     else process.env.MOZAI_HF_SAM3_SPACE_URL=oldUrl;
   }
 });
+
+test('a rejected semantic mask is reported as no match, not service outage or quota',()=>{
+  assert.throws(()=>parseCompleteEvent('event: error\ndata: {"error":"Semantic SAM: validate (ValueError)"}\n\n'),
+    error=>error.status===422&&error.code==='SAM3_NO_MATCH'&&/confidently isolate/.test(error.message));
+});

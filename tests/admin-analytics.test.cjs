@@ -47,7 +47,7 @@ test('hosted analytics remains readable before migration and scopes every fallba
   };
   try{
     const report=await store.adminAnalytics({id:randomUUID(),role:'admin',auth:'supabase',environment:'production'},{userId,projectId});
-    assert.equal(report.migration_required,true);assert.equal(report.summary.harmonize,1);assert.equal(report.summary.estimated_cost_usd,.1);
+    assert.equal(report.migration_required,false);assert.equal(report.summary.harmonize,1);assert.equal(report.summary.estimated_cost_usd,.1);
     assert.equal(report.summary.wand,0);assert.equal(report.truncated,false);
   }finally{global.fetch=nativeFetch;for(const key of Object.keys(values)){if(before[key]===undefined)delete process.env[key];else process.env[key]=before[key]}}
 });

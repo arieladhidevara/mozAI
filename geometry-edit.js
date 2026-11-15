@@ -4,6 +4,8 @@
 import './premium.js';
 import './object-map.js';
 import {calculateMaskDelta} from './geometry-mask.mjs';
+import {matchRevealedIdentity,partitionRevealed} from './reveal-ownership.mjs';
+import './object-reconstruction.js';
 
 const core=window.MosaicCore;
 const {state,canvas,makeCanvas,toast,render,renderGroups}=core;
@@ -15,8 +17,10 @@ const switcher=document.createElement('div');
 switcher.className='geometry-mode-switcher';
 switcher.setAttribute('role','group');
 switcher.setAttribute('aria-label','Edit mode');
-switcher.innerHTML='<button type="button" data-geometry-mode="material" aria-pressed="true">Material</button><button type="button" data-geometry-mode="shape" aria-pressed="false">Shape</button><button type="button" id="geometryRemoveBtn" title="Remove the selected object">Remove</button>';
-promptForm.querySelector('.quick-area-title').after(switcher);
+switcher.innerHTML='<label>Edit <select id="quickEditMode"><option value="material">Material</option><option value="shape">Shape</option></select></label><button type="button" id="geometryRemoveBtn" title="Remove the selected object">Remove object</button>';
+$('quickPromptMorePanel').append(switcher);
+$('quickEditMode').addEventListener('change',event=>setMode(event.target.value));
+$('quickPromptMore').addEventListener('click',()=>{const panel=$('quickPromptMorePanel');panel.hidden=!panel.hidden;$('quickPromptMore').setAttribute('aria-expanded',String(!panel.hidden));});
 const modeHint=document.createElement('p');
 modeHint.className='geometry-mode-hint';
 switcher.after(modeHint);
@@ -39,7 +43,7 @@ function syncPromptMode(){
   }else setMode(mode);
 }
 function setMode(next){
-  mode=next==='shape'?'shape':'material';
+  mode=next==='shape'?'shape':'material';$('quickEditMode').value=mode;
   for(const button of switcher.querySelectorAll('[data-geometry-mode]')){
     const active=button.dataset.geometryMode===mode;
     button.classList.toggle('active',active);
@@ -159,41 +163,73 @@ function compositedResult(before,generated,changeMask){
   result.getContext('2d').drawImage(clip,0,0);
   return result;
 }
-// SAM assigns only well-supported newly revealed pixels to existing objects.
-// Ambiguous pixels stay unassigned instead of corrupting a permanent texture.
-async function matchRevealedOwners(image,revealedMask,excludedGroup){
+// Vision supplies category words and candidate instances; SAM supplies boundaries.
+// Identity is verified against unchanged pixels, never just the category name.
+async function matchRevealedOwners(image,revealedMask,excludedGroup,before,isCurrent){
   const exposed=binary(revealedMask),revealCount=exposed.reduce((a,b)=>a+b,0);
-  if(revealCount<64)return [];
-  const oldBox=core.exactMaskBoundingBox(revealedMask);
-  const center=b=>({x:b.x+b.w/2,y:b.y+b.h/2});
-  const candidates=state.groups.filter(g=>g!==excludedGroup&&!g.mergedInto&&!g.objectRemoved)
-    .map(g=>({group:g,label:promptLabel(g),mask:core.groupMask(g)}))
-    .filter(o=>o.label&&o.mask&&core.exactMaskBoundingBox(o.mask))
-    .map(o=>{
-      const b=core.exactMaskBoundingBox(o.mask),a=center(oldBox),c=center(b);
-      const distance=Math.hypot(a.x-c.x,a.y-c.y);
-      const surface=/floor|wall|ceiling|ground|pavement|carpet|tile/i.test(o.label)?1:0;
-      return {...o,distance,priority:surface*10000-distance};
-    })
-    .sort((a,b)=>b.priority-a.priority).slice(0,3);
-  const collected=[],claimed=new Uint8Array(exposed.length);
-  for(const entry of candidates){
-    try{
-      const next=await samMask(image,entry.label,entry.mask);
-      const old=binary(entry.mask),fresh=binary(next);
-      let original=0,retained=0,newlyVisible=0;
-      for(let i=0;i<old.length;i++){
-        if(old[i]){original++;if(fresh[i]&&!exposed[i])retained++;}
-        if(exposed[i]&&fresh[i]&&!claimed[i])newlyVisible++;
-      }
-      // Both shape continuity AND ownership of exposed pixels are necessary.
-      if(original<20||retained/original<.4||newlyVisible<Math.max(16,revealCount*.04))continue;
-      const bits=new Uint8Array(exposed.length);
-      for(let i=0;i<bits.length;i++)if(exposed[i]&&fresh[i]&&!claimed[i]){bits[i]=1;claimed[i]=1;}
-      collected.push({groupId:entry.group.id,mask:rasterFromBits(bits),confidence:Math.min(1,retained/original)});
-    }catch(error){console.warn('[mozAI:revealed-owner]',entry.label,error?.message||error);}
+  if(revealCount<20)return {assignments:[],unresolved:revealedMask,analysisFailed:false};
+  const known=state.groups.filter(g=>g!==excludedGroup&&!g.createdLocally&&!g.createdViaAI&&!g.mergedInto&&!g.objectRemoved&&!g.cutArchived&&!g.objectMapBatch&&!g.reconstructionHidden)
+    .map(group=>({group,id:group.id,label:promptLabel(group),mask:core.groupMask(group)}))
+    .filter(o=>core.exactMaskBoundingBox(o.mask)).map(o=>({...o,bits:binary(o.mask)}));
+  const b=core.exactMaskBoundingBox(revealedMask),pad=Math.max(96,Math.max(b.w,b.h)*.6);
+  const crop={x:Math.max(0,Math.floor(b.x-pad)),y:Math.max(0,Math.floor(b.y-pad))};
+  crop.w=Math.min(canvas.width,Math.ceil(b.x+b.w+pad))-crop.x;
+  crop.h=Math.min(canvas.height,Math.ceil(b.y+b.h+pad))-crop.y;
+  const scale=Math.min(1,768/Math.max(crop.w,crop.h)),w=Math.max(1,Math.round(crop.w*scale)),h=Math.max(1,Math.round(crop.h*scale));
+  const preview=(source,mask=false)=>{
+    const frame=makeCanvas(w,h),ctx=frame.getContext('2d');
+    if(mask){ctx.fillStyle='#000';ctx.fillRect(0,0,w,h)}
+    ctx.drawImage(source,crop.x,crop.y,crop.w,crop.h,0,0,w,h);
+    return frame.toDataURL(mask?'image/png':'image/jpeg',.85);
+  };
+  const normalized=box=>[box.x-crop.x,box.y-crop.y,box.x+box.w-crop.x,box.y+box.h-crop.y]
+    .map((v,i)=>Math.round(Math.max(0,Math.min(1000,v/(i%2?crop.h:crop.w)*1000))));
+  const nearby=known.filter(o=>{const box=core.exactMaskBoundingBox(o.mask);return box.x<crop.x+crop.w&&box.y<crop.y+crop.h&&box.x+box.w>crop.x&&box.y+box.h>crop.y});
+  let targets=[],analysisFailed=false;
+  try{
+    toast('Identifying newly revealed objects...');
+    const answer=await window.MosaicAuth.request('/api/ai/reveal-context',{
+      before:preview(before),image:preview(image),mask:preview(revealedMask,true),
+      objects:nearby.slice(0,64).map(o=>({id:o.id,label:o.label||'object',box:normalized(core.exactMaskBoundingBox(o.mask))}))
+    });
+    if(!Array.isArray(answer.targets)||answer.targets.length>6)throw Error('Invalid revealed labels');
+    targets=answer.targets.filter(t=>t.confidence>=.8&&typeof t.label==='string'&&t.label.trim()&&t.label.length<=80&&Array.isArray(t.box)&&t.box.length===4&&t.box.every(n=>Number.isFinite(n)&&n>=0&&n<=1000)&&t.box[2]>t.box[0]&&t.box[3]>t.box[1]&&(!t.existingId||nearby.some(o=>o.id===t.existingId)));
+  }catch{analysisFailed=true;
+    // Recognition failure can still verify known labels; it must not invent a new owner.
+    targets=nearby.filter(o=>o.label).slice(0,3).map(o=>({label:o.label,existingId:o.id,confidence:.8}));
   }
-  return collected;
+  const candidates=[],seen=new Set();
+  for(const target of targets){
+    if(!isCurrent())throw Error('Project changed while identifying revealed objects.');
+    const owner=known.find(o=>o.id===target.existingId);
+    let guidance=owner?.mask||revealedMask;
+    if(target.box){
+      guidance=makeCanvas(canvas.width,canvas.height);const ctx=guidance.getContext('2d');ctx.fillStyle='#fff';
+      ctx.fillRect(crop.x+target.box[0]/1000*crop.w,crop.y+target.box[1]/1000*crop.h,(target.box[2]-target.box[0])/1000*crop.w,(target.box[3]-target.box[1])/1000*crop.h);
+    }
+    try{
+      toast('Finding '+target.label+' boundaries...');
+      const mask=await samMask(image,target.label,guidance),fresh=binary(mask);
+      if(!isCurrent())throw Error('Project changed while finding boundaries.');
+      const match=matchRevealedIdentity(fresh,exposed,known.map(o=>({id:o.id,mask:o.bits})),target.existingId||'');
+      let groupId=match?.id||null;
+      if(!groupId){
+        // A proposed existing identity that fails verification stays unresolved.
+        if(target.existingId||analysisFailed||target.confidence<.85)continue;
+        // Partial agreement with an existing object is ambiguous, not a new instance.
+        const overlapsKnown=known.some(o=>{let both=0;for(let i=0;i<fresh.length;i++)if(!exposed[i]&&fresh[i]&&o.bits[i])both++;return both>=20});
+        if(overlapsKnown)continue;
+      }
+      const key=groupId||target.label+':'+(target.box||[]).join(',');
+      if(seen.has(key))continue;seen.add(key);
+      candidates.push({groupId,label:target.label,confidence:Math.min(target.confidence,match?.retained||1),mask:fresh});
+    }catch(error){
+      if(error?.code==='SAM3_QUOTA'||error?.status===429){analysisFailed=true;break;}
+      analysisFailed=true;
+    }
+  }
+  const partition=partitionRevealed(exposed,candidates);
+  return {assignments:partition.assignments.map(a=>({...a,mask:rasterFromBits(a.mask)})),unresolved:rasterFromBits(partition.unresolved),analysisFailed};
 }
 function accumulateRevealedPixels(event,before,aligned){
   state.objectReconstruction??={version:1,events:[]};
@@ -244,8 +280,17 @@ function showReview(result,status,operation){
 function commit(){
   if(!review)return;
   const item=review;
-  if(state.selectionGeneration!==item.generation||state.master!==item.master){closeReview();toast('Project changed. Generate the shape again.');return;}
+  if(!item.isCurrent()){closeReview();toast('Project changed. Generate the shape again.');return;}
+  const undo=window.MosaicReconstruction.snapshot();
   const group=item.group||core.newGroup(item.oldMask,item.label||'Region');
+  if(!group.objectOriginal){
+    // Preserve the native silhouette before the removal patch adds edge padding.
+    const original=group.maskCrop?makeCanvas(canvas.width,canvas.height):clone(group.footprint||item.oldMask);
+    if(group.maskCrop)original.getContext('2d').drawImage(group.maskCrop.mask,group.maskCrop.x,group.maskCrop.y);
+    const appearance=clone(state.master),ctx=appearance.getContext('2d');
+    ctx.globalCompositeOperation='destination-in';ctx.drawImage(original,0,0);
+    group.objectOriginal={mask:original,appearance,repairs:[]};
+  }
   group.objectId=group.objectId||group.id;
   if(item.label&&!group.objectLabel)group.objectLabel=item.label;
   const sourceId=core.uid('geometry_source'),patchId=core.uid('geometry_patch'),mask=clone(item.masks.padded);
@@ -271,13 +316,27 @@ function commit(){
     oldMask:clone(item.oldMask),newMask:item.newMask?clone(item.newMask):null,
     revealedMask:clone(item.masks.reveal),
     revealedRGB:(()=>{const c=clone(item.aligned),x=c.getContext('2d');x.globalCompositeOperation='destination-in';x.drawImage(item.masks.reveal,0,0);return c;})(),
-    cameraOffset:item.offset,ownership:item.assignments.length?'partially-matched':'unassigned',
-    assignments:item.assignments.map(a=>({groupId:a.groupId,mask:clone(a.mask),confidence:a.confidence})),
+    cameraOffset:item.offset,ownershipVersion:item.operation==='remove'?3:2,ownership:item.assignments.length?(core.exactMaskBoundingBox(item.unresolved)?'partially-matched':'matched'):'unassigned',
+    unresolvedMask:clone(item.unresolved),
+    assignments:item.assignments.map(a=>({...a,mask:clone(a.mask)})),
     createdAt:new Date().toISOString()
   };
+  for(const assignment of reconstructionEvent.assignments){
+    let owner=state.groups.find(g=>g.id===assignment.groupId);
+    if(!owner){
+      owner=core.newGroup(assignment.mask,core.categoryFromText(assignment.label));
+      owner.name=assignment.label;owner.objectName=assignment.label;owner.objectLabel=assignment.label;owner.manualName=true;
+      owner.reconstructionEventId=reconstructionEvent.id;
+      assignment.groupId=owner.id;
+    }
+    owner.reconstructionExpanded=true;
+  }
   state.objectReconstruction.events.push(reconstructionEvent);
   accumulateRevealedPixels(reconstructionEvent,item.before,item.aligned);
   core.invalidateDisplayedMask(patch);
+  window.MosaicReconstruction.sync();
+  state.undo.push({type:'object-reconstruction',value:undo});core.trimUndo();state.redo=[];
+  window.MosaicRecovery?.markChanged?.();
   closeReview();renderGroups();render();
   if(item.operation==='remove')core.resetSelection();
   else core.selectGroupMask(group,{showOutline:false});
@@ -337,11 +396,16 @@ async function generate(prompt,files=[],operation='shape'){
   if(!state.master||!core.selectionBounds()){toast('Select one object first.');return;}
   core.ensureSelectionMask();
   if(state.pendingSourceId||state.editingPatchId){toast('Finish the pending import or mask edit first.');return;}
-  const before=core.composeApprovedCanvas(),oldMask=clone(state.selectionMask),generation=state.selectionGeneration,master=state.master;
+  const oldMask=clone(state.selectionMask),generation=state.selectionGeneration,master=state.master;
+  const sceneStamp=()=>JSON.stringify(state.groups.map(g=>[g.id,g.active,g.objectRemoved,g.geometryVersion,g.frontStackOrder,g.createdStackOrder]));
+  const submittedScene=sceneStamp();
+  const isCurrent=()=>generation===state.selectionGeneration&&state.master===master&&sceneStamp()===submittedScene;
   let group,label;
   try{group=chooseGroup(oldMask);label=promptLabel(group);
     if(operation==='shape'&&!label)throw Error('Name or select a recognized object before Shape editing so SAM can identify it.');
   }catch(error){toast(error.message);return;}
+  const snapshot=core.materialEditSnapshot([{groupId:group?.id,mask:oldMask}]);
+  const before=snapshot.image;
   processing=true;const submit=promptForm.querySelector('[type="submit"]');
   if(submit)submit.disabled=true;
   try{
@@ -349,18 +413,20 @@ async function generate(prompt,files=[],operation='shape'){
       prompt;
     const fullPrompt='OBJECT GEOMETRY EDIT: '+task+' Keep the camera, focal length, perspective, room structure, framing and ALL unselected objects unchanged. Render the ENTIRE image at the same viewpoint and resolve any background exposed by the edit. Do not create colored masks or labels.';
     toast(operation==='remove'?'Removing object in full image…':'Generating full-image shape edit…');
-    const generated=await window.MosaicPremium.generateComposition(fullPrompt,files,before,null,{editIntent:operation});
-    if(generation!==state.selectionGeneration||state.master!==master){toast('The project changed during generation; result discarded.');return;}
+    const generated=operation==='remove'?await window.MosaicPremium.generateRemoval(task,oldMask,group?.id,files):await window.MosaicPremium.generateComposition(fullPrompt,files,before,null,{editIntent:operation,targetLabel:label});
+    if(!isCurrent()){toast('The project changed during generation; result discarded.');return;}
     const alignedResult=alignTranslation(before,generated,oldMask);
     let newMask=null;
     if(operation==='shape')newMask=await samMask(alignedResult.image,label,oldMask);
-    if(generation!==state.selectionGeneration||state.master!==master){toast('The project changed during segmentation; result discarded.');return;}
+    if(!isCurrent()){toast('The project changed during segmentation; result discarded.');return;}
     const masks=operationMasks(oldMask,newMask,operation);
-    const assignments=await matchRevealedOwners(alignedResult.image,masks.reveal,group);
-    if(generation!==state.selectionGeneration||state.master!==master){toast('Project changed while matching surfaces.');return;}
-    const result=compositedResult(before,alignedResult.image,masks.padded);
-    review={generation,master,oldMask,newMask,group,label,prompt:task,operation,masks,aligned:alignedResult.image,offset:alignedResult.offset,result,assignments,before};
-    showReview(result,alignedResult.status+' · '+(operation==='remove'?'Background recovered': 'SAM outline validated'),operation);
+    const {assignments,unresolved,analysisFailed}=operation==='remove'?{assignments:[],unresolved:clone(masks.reveal),analysisFailed:false}:await matchRevealedOwners(alignedResult.image,masks.reveal,group,before,isCurrent);
+    if(!isCurrent()){toast('Project changed while matching surfaces.');return;}
+    const result=compositedResult(core.composeApprovedCanvas(),alignedResult.image,masks.padded);
+    // Restore omitted foreground layers in the preview using their exact visible pixels.
+    for(const id of snapshot.excludedGroupIds){const g=state.groups.find(g=>g.id===id),p=state.patches.get(g?.active),source=state.sources.get(p?.sourceId);if(p&&source)core.drawPatch(result.getContext('2d'),p,source)}
+    review={generation,master,isCurrent,oldMask,newMask,group,label,prompt:task,operation,masks,aligned:alignedResult.image,offset:alignedResult.offset,result,assignments,unresolved,analysisFailed,before};
+    showReview(result,alignedResult.status+' · '+(operation==='remove'?'Removed area retained / use Select Add to assign parts': 'SAM outline validated'),operation);
     toast('Review the new image, then Apply or Discard.');
   }catch(error){toast('Shape edit: '+(error?.message||'Unable to generate. Original image is unchanged.'));}
   finally{processing=false;if(submit)submit.disabled=false;}

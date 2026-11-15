@@ -40,10 +40,10 @@ test('when there is no free side, popup stays on screen and minimizes overlap',(
   assert(clip(placed,selected)<form.width*form.height);
 });
 
-test('options are collapsed and compact instead of expanding the prompt sideways',()=>{
-  assert.match(app,/document\.createElement\('details'\)/);
-  assert.match(app,/document\.createElement\('summary'\)/);
-  assert.match(app,/rail\.open=false/);
+test('options are visible in a horizontal rail with advanced controls behind More',()=>{
+  assert.match(app,/rail=document\.createElement\('div'\)/);
+  assert.match(html,/id="quickPromptMorePanel" hidden/);
+  assert.match(html,/id="quickPromptObjectName"/);
   assert.match(app,/form\.insertBefore\(rail,form\.querySelector\('\.prompt-footer'\)\)/);
   assert.match(css,/width:170px/);
   assert.match(css,/\.quick-area-prompt\.has-group-options\{/);

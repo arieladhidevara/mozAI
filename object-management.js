@@ -3,7 +3,7 @@ import {groupSimilarObjects} from './object-grouping.mjs';
 const core=window.MosaicCore,{state,makeCanvas,canvas}=core;
 const clone=source=>{const out=makeCanvas(source.width,source.height);out.getContext('2d').drawImage(source,0,0);return out};
 const title=text=>String(text||'Object').replace(/^./,c=>c.toUpperCase());
-const objects=()=>state.groups.filter(g=>!g.objectMapBatch&&!g.mergedInto&&!g.objectRemoved);
+const objects=()=>state.groups.filter(g=>!g.reconstructionHidden&&!g.objectMapBatch&&!g.mergedInto&&!g.objectRemoved);
 state.objectCollections??=[];
 function createCollection(name){
   const collection={id:core.uid('collection'),name:String(name||'Group '+(state.objectCollections.length+1)).trim().slice(0,64)||'New group'};

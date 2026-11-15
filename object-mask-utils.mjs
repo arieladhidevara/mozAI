@@ -28,3 +28,40 @@ export function validRepair(before,after,missing,w,h){if(!after||after.length!==
 // Stable topological sort. Explicit scene relationships take priority; cyclic
 // or legacy relationships retain their existing draw order.
 export function sceneOrder(groups){const result=[],pending=new Set(groups);while(pending.size){const next=[...pending].find(g=>![...pending].some(other=>other!==g&&other.objectBehind?.includes(g.id)));if(!next){result.push(...pending);break}result.push(next);pending.delete(next)}return result}
+
+// Original objects stay on the scene plane until individually brought forward.
+// Create layers and explicitly raised originals share one foreground stack.
+export const isCreatedGroup=group=>Boolean(group&&(group.createdLocally||group.createdViaAI));
+export const isForegroundGroup=group=>isCreatedGroup(group)||Number.isFinite(group?.frontStackOrder);
+const createdRank=(group,index)=>Number.isFinite(group.frontStackOrder)?group.frontStackOrder:
+  Number.isFinite(group.createdStackOrder)?group.createdStackOrder:index;
+export function orderedSceneGroups(groups){
+  const visible=groups.filter(group=>!group.cutArchived&&!group.reconstructionHidden);
+  // Resolve the original scene before removing lifted originals, so raising one
+  // object cannot reorder the other objects through their depth relationships.
+  const fixed=sceneOrder(visible.filter(group=>!isCreatedGroup(group))).filter(group=>!isForegroundGroup(group));
+  const foreground=visible.map((group,index)=>({group,index})).filter(({group})=>isForegroundGroup(group));
+  foreground.sort((a,b)=>createdRank(a.group,a.index)-createdRank(b.group,b.index)||a.index-b.index);
+  return [...fixed,...foreground.map(item=>item.group)];
+}
+export function nextCreatedOrder(groups){
+  return Math.max(-1,...groups.map((group,index)=>isForegroundGroup(group)?createdRank(group,index):-1))+1;
+}
+export function bringGroupToFront(groups,group){
+  if(!group||!groups.includes(group)||group.cutArchived||group.mergedInto||group.objectRemoved||group.objectMapBatch)return false;
+  const foreground=orderedSceneGroups(groups).filter(item=>isForegroundGroup(item)&&!item.mergedInto&&!item.objectRemoved);
+  if(foreground.at(-1)===group)return false;
+  group.frontStackOrder=nextCreatedOrder(groups);return true;
+}
+
+// Pair each unselected Create layer with only the edit targets below it. Pixel
+// overlap is checked by the compositor; overlapping bounding boxes are not enough.
+export function createdOccluderCandidates(groups,targetGroupIds){
+  const ordered=orderedSceneGroups(groups),positions=new Map(ordered.map((group,index)=>[group.id,index]));
+  const selected=new Set(targetGroupIds.filter(Boolean));
+  return ordered.flatMap((group,index)=>{
+    if(!isCreatedGroup(group)||selected.has(group.id)||group.mergedInto||group.objectRemoved||group.objectMapBatch)return [];
+    const targetIndices=targetGroupIds.flatMap((id,targetIndex)=>(positions.get(id)??-1)<index?[targetIndex]:[]);
+    return targetIndices.length?[{group,targetIndices}]:[];
+  });
+}

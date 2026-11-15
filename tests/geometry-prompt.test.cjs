@@ -23,3 +23,11 @@ test('Remove reconstructs newly visible background',()=>{
   assert.match(prompt,/TARGETED OBJECT REMOVAL/);
   assert.match(prompt,/reconstruct all background surfaces/);
 });
+
+
+test('regional Remove reconstructs the masked crop without preserving the removed object identity',()=>{
+  const prompt=buildPrompt({...sample('remove'),transparentLayer:false,createObject:false,targetObject:'chair'},true);
+  assert.match(prompt,/MASKED OBJECT REMOVAL/);
+  assert.match(prompt,/Return this same local crop/);
+  assert.doesNotMatch(prompt,/OBJECT-AWARE EDIT|ENTIRE scene|must remain a recognizable/);
+});

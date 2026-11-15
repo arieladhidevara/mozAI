@@ -9,7 +9,7 @@ module.exports=async function handler(req,res){
   if(!prompt)return send(res,400,{error:'Prompt required.'});
   const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),15000);
   try{
-    const response=await fetch('https://api.openai.com/v1/responses',{
+    const response=await require('../../lib/provider-telemetry').observedFetch(req,'option-name','gpt-4.1-mini','https://api.openai.com/v1/responses',{
       method:'POST',signal:controller.signal,
       headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},
       body:JSON.stringify({model:'gpt-4.1-mini',store:false,max_output_tokens:36,

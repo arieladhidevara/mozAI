@@ -4,6 +4,7 @@ import './object-aware.js';
 import {assertGeneratedImage,assertGeneratedRegion} from './generated-image.mjs';
 import {alignGeneratedToLockedMask} from './geometry-mask.mjs';
 import {planCreateAlphaCrop} from './create-alpha.mjs';
+import {refineCreateCutout} from './create-segmentation.js';
 const core = window.MosaicCore;
 if (!core) throw new Error('Mosaic core must load before Premium');
 const {state, canvas, makeCanvas, uid, render, renderGroups, resetSelection, assignGroup, maskBoundingBox, toast, message} = core;
@@ -38,7 +39,7 @@ function copyGraph(groups, patches, sources) {
     return maskCopies.get(mask);
   };
   return {
-    groups: groups.map(g => ({...g, objectBehind:g.objectBehind?[...g.objectBehind]:undefined,objectOriginal:g.objectOriginal?{...g.objectOriginal,repairs:[...g.objectOriginal.repairs]}:undefined,patchIds: [...g.patchIds],footprint: g.footprint?cloneCanvas(g.footprint):null})),
+    groups: groups.map(g => ({...g, frontOriginal:g.frontOriginal?{...g.frontOriginal,image:cloneCanvas(g.frontOriginal.image)}:undefined, objectBehind:g.objectBehind?[...g.objectBehind]:undefined,objectOriginal:g.objectOriginal?{...g.objectOriginal,repairs:[...g.objectOriginal.repairs]}:undefined,patchIds: [...g.patchIds],footprint: g.footprint?cloneCanvas(g.footprint):null})),
     patches: new Map([...patches].map(([id,p]) => [id, {...p, objectRepairs:p.objectRepairs?[...p.objectRepairs]:undefined,mask: copyMask(p.mask),request:p.request?{...p.request,mask:copyMask(p.request.mask)}:p.request, corners: p.corners?.map(q=>({...q}))||null}])),
     // Archived branches may reference lossless images already stored on disk.
     // Keep their disk pointers rather than decoding all inactive options here.
@@ -439,10 +440,10 @@ function encodeRequest(prompt,patch=null,masterSource=null,extraReferences=[],ma
   }
   throw Error('Image is too large for the server. Try a smaller Base image.');
 }
-function regionalCropWindow(mask){
+function regionalCropWindow(mask,createObject=false){
   const bounds=core.exactMaskBoundingBox(mask);
   if(!bounds)throw Error('Select a visible part of the image before generating.');
-  const context=Math.max(48,Math.ceil(Math.max(bounds.w,bounds.h)*.15));
+  const context=Math.max(createObject?128:48,Math.ceil(Math.max(bounds.w,bounds.h)*(createObject?.5:.15)));
   const x=Math.max(0,Math.floor(bounds.x-context));
   const y=Math.max(0,Math.floor(bounds.y-context));
   const right=Math.min(canvas.width,Math.ceil(bounds.x+bounds.w+context));
@@ -468,10 +469,15 @@ function cropFrame(source,window,w,h,mask=false){
 }
 function encodeRegionalCrop(patch){
   const visualMask=cloneCanvas(core.displayedPatchMask(patch));
-  const editMask=window.MosaicObjects?.generationMask(patch)||visualMask;
-  const region=regionalCropWindow(editMask);
-  const collage=currentComposite(),base=state.reference||premium.initialMaster||state.master;
-  const group=state.groups.find(group=>group.patchIds.includes(patch.id));
+  const group=state.groups.find(group=>group.id===patch.groupId||group.patchIds.includes(patch.id));
+  const targets=patch.objectMapParts?.length?patch.objectMapParts.map(part=>({
+    groupId:part.groupId||state.groups.find(item=>item.objectMapKey===part.mapKey&&item.objectMapObjectKey===part.objectKey)?.id,
+    mask:part.mask
+  })):[{groupId:group?.id,mask:visualMask}];
+  const snapshot=patch.createObject?{image:currentComposite(),excludedGroupIds:new Set()}:core.materialEditSnapshot(targets);
+  const editMask=window.MosaicObjects?.generationMask(patch,{excludedGroupIds:snapshot.excludedGroupIds})||visualMask;
+  const region=regionalCropWindow(editMask,Boolean(patch.createObject));
+  const collage=snapshot.image,base=state.reference||premium.initialMaster||state.master;
   for(const maxDimension of [1152,960,768]){
     const contextScale=Math.min(1,maxDimension/Math.max(canvas.width,canvas.height));
     const scale=Math.max(128/Math.min(region.w,region.h),Math.min(1,maxDimension/Math.max(region.w,region.h)));
@@ -579,6 +585,51 @@ function prepareCroppedCreateLayer(image,region,originalPixels=null){
   return {mask,bbox,maskOffset:{x:bbox.x,y:bbox.y},paths,
     compact:{canvas:source,crop:sourceCrop}};
 }
+async function cleanCreatedSubject(image,prompt,progress){
+  progress.update(85,'Locating the requested objects in the generated image...');
+  const scale=Math.min(1,768/Math.max(image.width,image.height));
+  const preview=makeCanvas(Math.max(1,Math.round(image.width*scale)),Math.max(1,Math.round(image.height*scale)));
+  const ctx=preview.getContext('2d');ctx.fillStyle='#ddd';ctx.fillRect(0,0,preview.width,preview.height);ctx.drawImage(image,0,0,preview.width,preview.height);
+  const intent=await window.MosaicAuth.request('/api/ai/object-intent',{
+    image:preview.toDataURL('image/jpeg',.86),prompt,createObject:true
+  });
+  if(intent.kind!=='object'||intent.confidence<.8||!intent.targets?.length)
+    throw Error('The requested objects could not be located reliably.');
+  progress.update(88,'SAM 3 is isolating the requested objects...');
+  return refineCreateCutout(image,intent.targets,{
+    request:(path,options)=>window.MosaicAccount.request(path,options),makeCanvas,
+    onProgress:(index,total,label)=>progress.update(88,'Isolating '+label+' ('+index+'/'+total+')...')
+  });
+}
+async function retryCreateCleanup(patchId){
+  const patch=state.patches.get(patchId);
+  if(!patch||!patch.createObject||patch.generating||!await window.MosaicAuth.ensure())return false;
+  const sourceId=patch.sourceId,source=state.sources.get(sourceId),generation=state.selectionGeneration;
+  if(!source)return false;
+  const group=state.groups.find(g=>g.patchIds.includes(patchId)),choice=core.groupChoiceVersion(group);
+  patch.generating=true;renderGroups();
+  const progress=beginAIProgress('Clean up created object','Reusing the saved image; no image generation.',{scope:'region',patchId});
+  try{
+    if(!source.canvas)await window.MosaicDiskCache.ensure(source,'canvas');
+    const image=source.canvas,region={x:source.crop?.x||0,y:source.crop?.y||0,w:image.width,h:image.height};
+    const result=await cleanCreatedSubject(image,patch.prompt,progress);
+    if(state.patches.get(patchId)!==patch||state.selectionGeneration!==generation||patch.sourceId!==sourceId)return false;
+    const local=prepareCroppedCreateLayer(result.image,region),id=uid('cleaned_source');
+    state.sources.set(id,{id,name:'Cleaned Create object',...local.compact,revealComplete:true});
+    Object.assign(patch,{sourceId:id,mask:local.mask,maskOffset:local.maskOffset,bbox:local.bbox,maskPaths:local.paths,
+      maskPoints:local.paths.flat(),createCleanupPending:false,createCleanupWarning:'',createSegmentationLabel:result.label,
+      maskAlignmentStatus:'sam3-smooth',maskAlignmentSegmentation:'sam3',maskAlignmentCoverage:result.coverage});
+    core.invalidateDisplayedMask(patch,{geometryChanged:false});
+    if(group){core.refreshGroupFootprint(group);if(core.groupChoiceVersion(group)===choice)await core.chooseGroupOption(group,patchId)}
+    progress.done('Requested objects isolated and applied.');toast('Object cleanup complete.');return true;
+  }catch(error){
+    if(state.patches.get(patchId)===patch){patch.createCleanupWarning='Cleanup failed: '+error.message;}
+    progress.fail('Cleanup failed. Your saved image is kept for retry.');toast('Cleanup failed: '+error.message);return false;
+  }finally{
+    if(state.patches.get(patchId)===patch)patch.generating=false;
+    renderGroups();render();
+  }
+}
 async function generateRegion(patchId,regenerate=false){
   const patch=state.patches.get(patchId);
   if(!patch||patch.generating||(!regenerate&&!patch.awaitingResult))return;
@@ -644,7 +695,7 @@ async function generateRegion(patchId,regenerate=false){
         // Unlike Material Edit, the AI-generated alpha defines the silhouette.
         // The drawn Create mask was only a placement hint and must never clip it.
         if(answer.mimeType!=='image/png')throw Error('Create requires a transparent PNG from OpenAI.');
-        const rgba=image.getContext('2d',{willReadFrequently:true}).getImageData(0,0,image.width,image.height).data;
+        let rgba=image.getContext('2d',{willReadFrequently:true}).getImageData(0,0,image.width,image.height).data;
         let subjectPixels=0,clearPixels=0;
         for(let i=3;i<rgba.length;i+=4){
           if(rgba[i]>=12)subjectPixels++;
@@ -652,10 +703,25 @@ async function generateRegion(patchId,regenerate=false){
         }
         if(subjectPixels<16||clearPixels<rgba.length/4*.01)
           throw Error('AI did not return a usable transparent cutout. Regenerate Create without applying this result.');
-        // The generated PNG already contains its object silhouette in alpha.
-        // Do not contact SAM 3 or re-segment it. This eliminates the extra
-        // network inference and main-thread mask decode/upscale on every Create.
-        progress.update(92,'Applying the generated transparent PNG…');
+        let segmentation=null,cleanupWarning='';
+        try{
+          segmentation=await cleanCreatedSubject(image,payload.prompt,progress);
+          image=segmentation.image;
+          rgba=image.getContext('2d',{willReadFrequently:true}).getImageData(0,0,image.width,image.height).data;
+        }catch(error){
+          cleanupWarning=error.code==='SAM3_QUOTA'||error.status===429
+            ?'SAM 3 quota reached. Result saved but not applied. Retry cleanup later.'
+            :'Object cleanup failed. Result saved but not applied: '+error.message;
+        }
+        // SAM inference is asynchronous: never apply its result to another
+        // project, a removed Option, or an image that changed while waiting.
+        if(state.patches.get(patchId)!==patch||state.selectionGeneration!==projectAtStart||
+          existing.sourceId!==generationId||!state.sources.has(generationId)||
+          canvas.width!==canvasSize.width||canvas.height!==canvasSize.height){
+          if(state.patches.get(patchId)===patch)patch.generating=false;
+          progress.done('Project changed; current work was kept.');return;
+        }
+        progress.update(94,segmentation?'Applying the clean, softened object edges…':'Applying the generated transparent PNG…');
         // Untransformed Create cuts out locally. Explicit four-corner edits
         // still use the existing full-frame unwarp to preserve perspective.
         let objectMask,bounds,compact,maskOffset=null,maskPaths;
@@ -693,11 +759,13 @@ async function generateRegion(patchId,regenerate=false){
         existing.maskPaths=maskPaths;
         existing.maskPoints=existing.maskPaths.flat();
         existing.editMode='create';
-        existing.maskAlignmentStatus='png-alpha';
-        delete existing.createSegmentationLabel;
-        existing.maskAlignmentSegmentation=null;
+        existing.maskAlignmentStatus=segmentation?'sam3-smooth':'png-alpha';
+        existing.createSegmentationLabel=segmentation?.label||null;
+        existing.createCleanupWarning=cleanupWarning;
+        existing.createCleanupPending=Boolean(cleanupWarning);
+        existing.maskAlignmentSegmentation=segmentation?'sam3':null;
         existing.maskAlignmentIoU=null;
-        existing.maskAlignmentCoverage=null;
+        existing.maskAlignmentCoverage=segmentation?.coverage??null;
         existing.awaitingResult=false;existing.hideUntilReady=false;existing.generating=false;
         if(existing.request){delete existing.request.baseImage;delete existing.request.reference;}
         if(!existing.manualName&&!existing.semanticNamed)
@@ -707,7 +775,7 @@ async function generateRegion(patchId,regenerate=false){
         core.invalidateDisplayedMask(existing,{geometryChanged:false});
         const group=state.groups.find(g=>g.patchIds.includes(patchId));
         const previous=group&&lastAppliedGenerations.get(group);
-        const activate=Boolean(group&&core.groupChoiceVersion(group)===choiceAtStart&&
+        const activate=Boolean(segmentation&&group&&core.groupChoiceVersion(group)===choiceAtStart&&
           requestOrder>(previous?.order||0)&&
           (group.active===activeAtStart||group.active===previous?.patchId));
         if(group){
@@ -717,8 +785,10 @@ async function generateRegion(patchId,regenerate=false){
           if(activate)core.attachGeneratedSelection(existing,group);
         }
         renderGroups();render();
-        progress.done(activate?'Transparent object placed.':'Transparent object saved as an Option.');
-        toast(activate?'Created object added to the scene.':'Created object saved in Group options.');
+        if(cleanupWarning)progress.fail('Cleanup required. Retry cleanup from this Option.');
+        else progress.done(activate?'Transparent object placed.':'Transparent object saved as an Option.');
+        if(cleanupWarning){message(cleanupWarning);toast(cleanupWarning)}
+        else toast(activate?'Created object added with clean, soft edges.':'Created object saved in Group options.');
         return;
       }
       const generatedLayer=makeCanvas(canvasSize.width,canvasSize.height);
@@ -970,6 +1040,7 @@ function createRegionRequest(prompt,referenceImages=[],selectedMask=state.select
   const regionNumber=++premium.regionSerial,color=REGION_COLORS[(regionNumber-1)%REGION_COLORS.length];
   const patch = {id: uid('ai_patch'), sourceId, mask, bbox, maskPaths:window.MozMaskGeometry.copyPaths(selectedPaths),maskPoints:selectedPoints?.map(point=>({...point}))||[],regionNumber, color,
     name: core.optionNameFromPrompt(text,'AI edit '+regionNumber), manualName:false, prompt: text, referenceImages, awaitingResult: true, hideUntilReady: true,
+    reconstructionEvents:window.MosaicReconstruction?.activeIds()||[],
     groupId:groupId||null,
     projectPrompt: premium.projectPrompt,
     request: {baseImage: base, reference: state.reference, mask, prompt: text}};
@@ -1011,6 +1082,8 @@ function createRegionRequest(prompt,referenceImages=[],selectedMask=state.select
   return patch.id;
 }
 async function generateSelection(prompt,groupId=null,referenceFiles=[]){
+  const selected=state.groups.find(g=>g.id===(groupId||state.draftGroupId));
+  if(window.MosaicReconstruction?.isRemovedRegion(selected)){toast('Select an existing object, then use Select Add to take part of the Removed area.');return;}
   if(!await window.MosaicAuth.ensure())return;
   if(!canSelectArea()){toast('Finish the current imported layer before generating.');return}
   if(state.lasso.length>2)core.updateMaskWithLasso();
@@ -1491,6 +1564,22 @@ function onPatchApplied() {
   // A committed patch stays selected so its four corner handles are immediately available.
   if(state.selectedPatchId){const group=state.groups.find(g=>g.active===state.selectedPatchId);if(group)core.selectGroupMask(group);else core.selectTool('select')}
 }
+async function generateRemoval(prompt,mask,groupId,files=[]){
+  if(!await window.MosaicAuth.ensure())throw Error('Connect Image AI before removing an object.');
+  const master=state.master,generation=state.selectionGeneration;
+  const progress=beginAIProgress('Removing object','Preparing selected crop...',{scope:'canvas'});
+  try{
+    const references=await prepareReferenceImages(files);
+    const capture=encodeRegionalCrop({mask,bbox:core.exactMaskBoundingBox(mask),prompt,groupId,referenceImages:references});
+    capture.payload.editIntent='remove';
+    progress.update(25,'Reconstructing the area behind the selected object...');
+    const result=await window.MosaicAuth.request('/api/ai/edit',capture.payload);
+    if(state.master!==master||state.selectionGeneration!==generation)throw Error('The project changed during removal.');
+    const region=capture.region,image=await fromGeneratedJPEG(result.image,{width:region.w,height:region.h});
+    const frame=cloneCanvas(capture.collage);frame.getContext('2d').drawImage(image,region.x,region.y,region.w,region.h);
+    progress.done('Removal ready. Identifying revealed objects...');return frame;
+  }catch(error){progress.fail(error.message);throw error}
+}
 async function generateComposition(prompt,files,source,markup=null,options={}){
   const master=state.master,generation=state.selectionGeneration;
   const size={width:canvas.width,height:canvas.height};
@@ -1528,11 +1617,11 @@ async function generateComposition(prompt,files,source,markup=null,options={}){
   }
 }
 window.MosaicPremium = {
-  generateComposition,
+  generateComposition,generateRemoval,
   positionCanvasProgress,
   isMasterGenerating:()=>premium.masterJob?.generation===state.selectionGeneration,
   projectPrompt: () => premium.projectPrompt,
-  onReferenceLoaded, onMasterLoaded, onBaseContinue, onSourcesAligned, onSourceEdited, onMasterReset, canSelectArea, onPatchApplied, generateSelection, regenerateOption, bindInlineReferencePrompt, decorateActive: activePatchMarkup, getReferenceFiles, clearReferenceFiles, getMasterVersions, regenerateMaster, initialMasterImage, exportProjectState, restoreProjectState,
+  retryCreateCleanup, onReferenceLoaded, onMasterLoaded, onBaseContinue, onSourcesAligned, onSourceEdited, onMasterReset, canSelectArea, onPatchApplied, generateSelection, regenerateOption, bindInlineReferencePrompt, decorateActive: activePatchMarkup, getReferenceFiles, clearReferenceFiles, getMasterVersions, regenerateMaster, initialMasterImage, exportProjectState, restoreProjectState,
   drawArchivePreview, isPreviewing, renderHistory, handleGroupEvent,
   originalImage, exportPrompt, drawRegionGuides, classifyArea
 };

@@ -1,7 +1,7 @@
 /* Object state is metadata on existing Groups and Options. Smart Select is
    explicitly enabled in the prompt; other object processing stays invisible. */
 import './app.js';
-import {binary,signature,count,combine,overlap,bounds,sceneOrder} from './object-mask-utils.mjs';
+import {binary,signature,count,combine,overlap,bounds,orderedSceneGroups} from './object-mask-utils.mjs';
 const core=window.MosaicCore,{state,makeCanvas}=core;
 const config=window.MosaicObjectConfig||{};
 let selection=null,revision=0,timer,applying=false,preview=null,previewFrame,repairTimer,repairRevision=0,worker,workerSerial=0;
@@ -178,7 +178,7 @@ async function prepare(prompt){
   if(!smartSelectEnabled||context.mode!==smartModeRevision)return {mask:context.mask,paths:context.paths,intent:null,groupId:context.groupId,project:context.project};
   return {...result,project:context.project};
 }
-function orderedGroups(){return sceneOrder(state.groups.filter(group=>!group.cutArchived))}
+function orderedGroups(){return orderedSceneGroups(state.groups)}
 function setIdentity(group,mask,label){
   if(!group.objectOriginal){
     // The original look is only ever drawn through this object's silhouette.
@@ -212,13 +212,13 @@ function capture(patch,group,objectSelection){
   patch.objectSupport=raster(support);
   scheduleRepair();
 }
-function generationMask(patch){
+function generationMask(patch,{excludedGroupIds=null}={}){
   const visual=core.displayedPatchMask(patch);
   if(!smartSelectEnabled||!patch.objectId||patch.geometryIntent==='appearance'||patch.corners?.length)return visual;
   const bits=data(visual),box=bounds(bits,visual.width,visual.height,Math.max(12,Math.round(Math.max(patch.bbox.w,patch.bbox.h)*.12)));
   if(!box)return visual;
   const mask=makeCanvas(visual.width,visual.height),x=mask.getContext('2d');x.fillStyle='#fff';x.fillRect(box.x,box.y,box.w,box.h);
-  const group=state.groups.find(g=>g.id===patch.groupId);for(const item of foreground(group)){x.globalCompositeOperation='destination-out';x.drawImage(item.mask,0,0)}
+  const group=state.groups.find(g=>g.id===patch.groupId);for(const item of foreground(group)){if(excludedGroupIds?.has(item.group.id))continue;x.globalCompositeOperation='destination-out';x.drawImage(item.mask,0,0)}
   return mask;
 }
 function geometryUncertain(before,after,mask){
@@ -265,7 +265,11 @@ function drawBase(target,groups=orderedGroups(),patches=state.patches){
   for(const group of groups)if(group.objectOriginal?.repairs?.length&&group.active){const active=patches.get(group.active);if(!active||active.awaitingResult)continue;const mask=core.displayedPatchMask(active);let cached=repairClipCache.get(group.objectOriginal);if(!cached||cached.mask!==mask){cached={mask,canvas:raster(combine(data(group.objectOriginal.mask),data(mask),'subtract'))};repairClipCache.set(group.objectOriginal,cached)}drawRepairs(target,group.objectOriginal,cached.canvas)}
 }
 function drawOriginal(target,group){
-  if(group.active||!group.objectOriginal?.appearance)return;
+  if(group.active)return;
+  if(Number.isFinite(group.frontStackOrder)&&group.frontOriginal?.image){
+    const {image,x,y}=group.frontOriginal;target.drawImage(image,x,y);return;
+  }
+  if(!group.objectOriginal?.appearance)return;
   const saved=group.objectOriginal;
   let original=originalDrawCache.get(saved);
   if(!original){
@@ -288,7 +292,7 @@ function invalidated(patch){
   scheduleRepair();
 }
 function drawComposition(target,base,groups,patches,sources){
-  target.clearRect(0,0,core.canvas.width,core.canvas.height);target.drawImage(base,0,0);const ordered=sceneOrder(groups);drawBase(target,ordered,patches);
+  target.clearRect(0,0,core.canvas.width,core.canvas.height);target.drawImage(base,0,0);const ordered=orderedSceneGroups(groups);drawBase(target,ordered,patches);
   for(const group of ordered){if(!group.active){drawOriginal(target,group);continue}const patch=patches.get(group.active),source=patch&&sources.get(patch.sourceId);if(patch&&source){core.drawPatch(target,patch,source);drawOptionRepairs(target,group,patch)}}
 }
 async function repairScene(version){
@@ -296,7 +300,7 @@ async function repairScene(version){
   const scene=token(),project=state.selectionGeneration,w=core.canvas.width,h=core.canvas.height;
   const requests=[];
   for(const group of orderedGroups()){
-    const patch=state.patches.get(group.active);if(!group.objectOriginal||patch?.awaitingResult||patch?.corners?.length)continue;
+    const patch=state.patches.get(group.active);if(window.MosaicReconstruction?.isRemovedRegion(group)||!group.objectOriginal||patch?.awaitingResult||patch?.corners?.length)continue;
     const mask=patch?core.groupMask(group):group.objectOriginal.mask;
     // Master texture hidden by the original object is a reusable base repair.
     if(patch){const missing=combine(data(group.objectOriginal.mask),data(mask),'subtract');if(count(missing))requests.push({record:group.objectOriginal,missing,exclude:combine(data(group.objectOriginal.mask),data(mask)),image:state.master,group,base:true})}

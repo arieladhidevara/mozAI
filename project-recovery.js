@@ -17,6 +17,10 @@
   const MAX_SNAPSHOT_BYTES = 500 * 1024 * 1024;
   const status = document.getElementById('recoveryStatus');
   const newButton = document.getElementById('newProjectBtn');
+  const loadDialog = document.getElementById('projectLoadDialog');
+  const restoreButton = document.getElementById('projectRestoreBtn');
+  let pendingRecovery = null;
+  let restoring = false;
   let ready = false;
   let stopping = false;
   let revision = 0;
@@ -37,7 +41,7 @@
     const actor = window.MosaicAccount?.current?.();
     return actor?.id ? 'user:' + actor.id : 'guest';
   };
-  const setStatus = value => { if (status) status.textContent = value; };
+  const setStatus = value => { if (status && status.textContent !== value) status.textContent = value; };
 
   function openDB() {
     return new Promise((resolve, reject) => {
@@ -140,6 +144,7 @@
   }
 
   function markLoaded() {
+    pendingRecovery = null;
     if (!ready || stopping) return;
     manuallySaved = true;
     dirty = false;
@@ -148,6 +153,42 @@
     lastWriteAt = 0;
     clearTimeout(timer); timer = null;
     schedule();
+  }
+
+  function offerRecovery() {
+    if (!ready || stopping || hasProject() || !pendingRecovery?.blob || !loadDialog) return false;
+    if (pendingRecovery.expiresAt <= Date.now()) {
+      pendingRecovery = null;
+      setStatus('Auto-recovery · Every 2 min · 24h');
+      return false;
+    }
+    if (!loadDialog.open) loadDialog.showModal();
+    return true;
+  }
+
+  async function restoreRecovery() {
+    if (restoring || !pendingRecovery || !offerRecovery()) return false;
+    restoring = true;
+    if (restoreButton) restoreButton.disabled = true;
+    loadDialog.close();
+    try {
+      const record = pendingRecovery;
+      const file = new File([record.blob], 'temporary-recovery.moz', {type:'application/json'});
+      const restored = await projects.loadProjectFile(file, {recovery: true});
+      if (restored) {
+        pendingRecovery = null;
+        manuallySaved = Boolean(record.saved);
+        dirty = !manuallySaved;
+        lastWriteAt = Number(record.updatedAt) || Date.now();
+        setStatus('Restored from this device · Expires after 24h idle');
+      } else {
+        setStatus('Recovery could not be restored · Load project to try again');
+      }
+      return Boolean(restored);
+    } finally {
+      restoring = false;
+      if (restoreButton) restoreButton.disabled = false;
+    }
   }
 
   async function newProject() {
@@ -190,16 +231,8 @@
       }
       // Absence of recovery in one tab must not delete an active tab's disk assets.
       if (record?.blob && !hasProject()) {
-        const file = new File([record.blob], 'temporary-recovery.moz', {type:'application/json'});
-        const restored = await projects.loadProjectFile(file, {recovery: true});
-        if (restored) {
-          manuallySaved = Boolean(record.saved);
-          dirty = !manuallySaved;
-          lastWriteAt = Number(record.updatedAt) || Date.now();
-          setStatus('Restored from this device · Expires after 24h idle');
-        } else {
-          setStatus('Recovery could not be restored · Save Project manually');
-        }
+        pendingRecovery = record;
+        setStatus('Previous session available · Load project to restore');
       } else {
         setStatus('Auto-recovery · Every 2 min · 24h');
       }
@@ -231,7 +264,12 @@
   }
 
   newButton?.addEventListener('click', () => void newProject());
-  window.MosaicRecovery = {markChanged,markSaved,markLoaded,newProject,
+  restoreButton?.addEventListener('click', () => void restoreRecovery());
+  document.getElementById('projectLoadFileBtn')?.addEventListener('click', () => {
+    loadDialog?.close();
+    document.getElementById('projectOpenInput')?.click();
+  });
+  window.MosaicRecovery = {markChanged,markSaved,markLoaded,newProject,offerRecovery,restoreRecovery,
     status:()=>({ready,dirty,pendingSave,lastWriteAt,owner})};
   void boot();
 })();

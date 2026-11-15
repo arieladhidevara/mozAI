@@ -8,7 +8,7 @@ module.exports=async function handler(req,res){
   if(typeof image!=='string'||image.length>950000||!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(image))return send(res,400,{error:'Invalid classification crop.'});
   const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),30000);
   try{
-    const result=await fetch('https://api.openai.com/v1/responses',{
+    const result=await require('../../lib/provider-telemetry').observedFetch(req,'classify','gpt-4.1-mini','https://api.openai.com/v1/responses',{
       method:'POST',signal:controller.signal,
       headers:{'Authorization':'Bearer '+key,'Content-Type':'application/json'},
       body:JSON.stringify({model:'gpt-4.1-mini',store:false,max_output_tokens:48,

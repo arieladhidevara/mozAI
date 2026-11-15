@@ -10,7 +10,7 @@ function mockBrowser(storage = new Map(), user = null) {
   const state = {master:null,reference:null,patches:new Map(),busy:false};
   const timers = new Map();
   const nodes = new Map();
-  const counters = {loaded:0,reloaded:0,written:0,confirmations:0};
+  const counters = {loaded:0,reloaded:0,written:0,confirmations:0,filePickers:0};
   let nextTimer = 0;
   let confirmResult = true;
   let created = false;
@@ -18,6 +18,10 @@ function mockBrowser(storage = new Map(), user = null) {
   const element = id => {
     if (!nodes.has(id)) nodes.set(id, {
       id,disabled:false,textContent:'',
+      open:false,
+      showModal(){this.open=true;},
+      close(){this.open=false;},
+      click(){if(id==='projectOpenInput')counters.filePickers++;this.onclick?.();},
       addEventListener(event,handler) { this['on' + event] = handler; },
       closest(){ return null; }
     });
@@ -91,7 +95,7 @@ function mockBrowser(storage = new Map(), user = null) {
   };
   vm.runInNewContext(source,context,{filename:'project-recovery.js'});
   return {
-    state,storage,counters,window:win,
+    state,storage,counters,window:win,element,
     setConfirm(v){confirmResult=v;},
     async settle(){
       for(let i=0;i<30;i++)await Promise.resolve();
@@ -110,7 +114,7 @@ test('local recovery script is valid JavaScript', () => {
   assert.doesNotThrow(()=>new vm.Script(source));
 });
 
-test('autosaves to browser disk, restores on reload and removes expired snapshots', async () => {
+test('autosaves to browser disk and waits for explicit Load project before restoring', async () => {
   const storage=new Map();
   const first=mockBrowser(storage);
   first.state.reference={width:16,height:16};
@@ -123,14 +127,51 @@ test('autosaves to browser disk, restores on reload and removes expired snapshot
 
   const reopened=mockBrowser(storage);
   await reopened.settle();
+  assert.equal(reopened.counters.loaded,0);
+  assert.equal(reopened.state.master,null);
+  assert.equal(reopened.element('projectLoadDialog').open,false);
+  assert.equal(reopened.window.MosaicRecovery.offerRecovery(),true);
+  assert.equal(reopened.element('projectLoadDialog').open,true);
+  assert.equal(reopened.counters.loaded,0);
+  await reopened.window.MosaicRecovery.restoreRecovery();
   assert.equal(reopened.counters.loaded,1);
   assert.ok(reopened.state.master);
+  assert.equal(reopened.element('projectLoadDialog').open,false);
+  assert.equal(reopened.window.MosaicRecovery.offerRecovery(),false);
 
   storage.get('guest').expiresAt=Date.now()-1;
   const expired=mockBrowser(storage);
   await expired.settle();
   assert.equal(expired.counters.loaded,0);
   assert.equal(storage.has('guest'),false);
+});
+
+test('Load project can choose a file without restoring or deleting the previous session', async () => {
+  const storage=new Map([['guest',{blob:new Blob(['{}']),updatedAt:Date.now(),expiresAt:Date.now()+60000}]]);
+  const browser=mockBrowser(storage);
+  await browser.settle();
+  assert.equal(browser.window.MosaicRecovery.offerRecovery(),true);
+  browser.element('projectLoadFileBtn').click();
+  assert.equal(browser.element('projectLoadDialog').open,false);
+  assert.equal(browser.counters.filePickers,1);
+  assert.equal(browser.counters.loaded,0);
+  assert.equal(storage.has('guest'),true);
+  assert.equal(browser.window.MosaicRecovery.offerRecovery(),true);
+  browser.element('projectLoadDialog').close();
+  assert.equal(browser.state.master,null);
+  assert.equal(browser.counters.loaded,0);
+});
+
+test('Load project goes straight to a file when no recovery exists or a project is already open', async () => {
+  const browser=mockBrowser();
+  await browser.settle();
+  assert.equal(browser.window.MosaicRecovery.offerRecovery(),false);
+  const storage=new Map([['guest',{blob:new Blob(['{}']),updatedAt:Date.now(),expiresAt:Date.now()+60000}]]);
+  const active=mockBrowser(storage);
+  await active.settle();
+  active.state.reference={width:16,height:16};
+  assert.equal(active.window.MosaicRecovery.offerRecovery(),false);
+  assert.equal(active.counters.loaded,0);
 });
 
 test('New Project warns for unsaved recovery and clears the old snapshot only on confirmation', async () => {

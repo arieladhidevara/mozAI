@@ -13,6 +13,7 @@ test('Phase 2 migration and invitation security in PostgreSQL',async t=>{
   await pg.exec(analyticsMigration);await pg.exec(analyticsMigration);
   const benchmarkMigration=await fs.readFile(path.resolve(__dirname,'../supabase/migrations/202611100001_benchmark_history.sql'),'utf8');
   await pg.exec(benchmarkMigration);await pg.exec(benchmarkMigration);
+  await pg.exec(await fs.readFile(path.resolve(__dirname,'../supabase/migrations/202611140001_provider_usage.sql'),'utf8'));
   const ids={admin:randomUUID(),first:randomUUID(),second:randomUUID(),unconfirmed:randomUUID()};
   for(const [name,id] of Object.entries(ids))await pg.query('insert into auth.users values($1,$2,$3)',[id,name+'@example.com',name==='unconfirmed'?null:new Date()]);
   const scalar=async(sql,args=[])=>Object.values((await pg.query(sql,args)).rows[0])[0];

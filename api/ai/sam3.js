@@ -7,10 +7,10 @@ module.exports = async function handler(req,res) {
   if (!await guard(req,res,'POST')) return;
   try {
     if (req.body?.mode === 'auto') {
-      const regions = await segmentAllImage(req.body);
+      const regions = await require('../../lib/provider-telemetry').measure(req,'sam3','sam3-auto',()=>segmentAllImage(req.body));
       return send(res,200,regions);
     }
-    const mask = await segmentImage(req.body);
+    const mask = await require('../../lib/provider-telemetry').measure(req,'sam3',req.body?.mode==='object'?'sam3-semantic':'sam3-point',()=>segmentImage(req.body));
     return send(res,200,{mask});
   } catch (error) {
     const status = error.status || (error.message.startsWith('Invalid ') ? 400 : error.name === 'AbortError' ? 504 : 502);

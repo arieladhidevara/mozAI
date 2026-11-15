@@ -102,7 +102,8 @@ function applySession(result,{interactive=false}={}){
   window.dispatchEvent(new CustomEvent('mosaic:account',{detail:{user,interactive}}));
 }
 async function request(path,{method='GET',body}={},retry=true){
-  if(!/^\/api\/(?:session|activity|admin|credits|ai\/(?:master|edit|edit-context|harmonize|chat|benchmark-object-map|classify|option-name|object-map|object-intent|scene-intent|sam3|connection))(?:\?|$)/.test(path))throw Error('Unsupported application request.');
+  if(!/^\/api\/(?:session|activity|admin|credits|ai\/(?:master|edit|edit-context|reveal-context|harmonize|chat|benchmark-object-map|classify|option-name|object-map|object-intent|scene-intent|sam3|connection))(?:\?|$)/.test(path))throw Error('Unsupported application request.');
+  if(path==='/api/ai/sam3'&&body&&!body.projectId)body={...body,projectId:await projectId()};
   const headers={...(body?{'Content-Type':'application/json'}:{}),...(user?{'X-Mosaic-Account-Id':user.id}:{})};
   const response=await fetch(path,{method,credentials:'same-origin',cache:'no-store',headers,...(body?{body:JSON.stringify(body)}:{})});
   const result=await response.json().catch(()=>({error:'Unexpected server response. Please retry.'}));

@@ -51,18 +51,19 @@ function backTo(target,id=null){
   button.onclick=()=>{view=target;detailId=id;page=1;void load()};return button;
 }
 function usageCards(host,summary){
-  metrics(host,{'AI mask edits':prettyNumber(summary.masking),'Harmonize':prettyNumber(summary.harmonize),
+  metrics(host,{'SAM3 calls':prettyNumber(summary.sam3),'AI chat calls':prettyNumber(summary.chat),'Supporting analyses':prettyNumber(summary.analyses),'AI mask edits':prettyNumber(summary.masking),'Harmonize':prettyNumber(summary.harmonize),
     'Master':prettyNumber(summary.master),'Wand selections':prettyNumber(summary.wand),
     'Auto Create runs':prettyNumber(summary.auto_create),'Mask adjustments':prettyNumber(summary.mask_edits),
     'Selections created':prettyNumber(summary.selections),
     'Estimated API cost (known)':prettyMoney(summary.estimated_cost_usd)});
   host.append(element('p',prettyNumber(summary.success)+' successful · '+prettyNumber(summary.failed)+' failed · '+prettyNumber(summary.pending)+' pending. '+
     summary.cost_records+'/'+summary.edits+' requests have cost estimates; '+prettyNumber(summary.total_tokens)+' known tokens. Missing costs remain unknown. Wand runs locally; its selections are not OpenAI image-generation charges.','usage-note'));
+  if(summary.services?.length){const panel=element('section',undefined,'admin-chart');panel.append(element('h3','Usage by service'));table(panel,summary.services.map(s=>({service:s.model,calls:s.calls,failed:s.failed,provider_tokens:prettyNumber(s.tokens),known_estimated_usd:prettyMoney(s.known_cost),average_ms:prettyNumber(s.average_ms)})));host.append(panel)}
   const note=element('p',undefined,'usage-note'),link=element('a','OpenAI standard token rates');link.href='https://developers.openai.com/api/docs/pricing';link.target='_blank';link.rel='noopener noreferrer';
-  note.append('API costs are approximate user-paid BYOK costs, calculated from provider-reported usage and ',link,'. Tool tracking starts with this release; earlier Wand and manual edits cannot be reconstructed.');host.append(note);
+  note.append('API costs are approximate user-paid BYOK costs, calculated from provider-reported usage and ',link,'. SAM GPU billing and missing provider usage remain unknown; wall-clock duration is not GPU time. Supporting model costs remain unknown until a verified tariff is configured. Tool tracking starts with this release; earlier Wand and manual edits cannot be reconstructed.');host.append(note);
 }
-const operationLabels={masking:'AI mask edits',master:'Master',harmonize:'Harmonize',wand:'Wand',auto_create:'Auto Create',mask_edits:'Mask adjustments'};
-const chartColors={masking:'#a28bf1',master:'#72b7ef',harmonize:'#69d2b2',wand:'#c3a7ff',auto_create:'#e3bd80',mask_edits:'#ea91b3',estimated_cost_usd:'#69d2b2'};
+const operationLabels={masking:'AI mask edits',master:'Master',harmonize:'Harmonize',wand:'Wand',auto_create:'Auto Create',mask_edits:'Mask adjustments',sam3:'SAM3',chat:'AI chat',analyses:'Supporting analyses',total_tokens:'Reported tokens'};
+const chartColors={masking:'#a28bf1',master:'#72b7ef',harmonize:'#69d2b2',wand:'#c3a7ff',auto_create:'#e3bd80',mask_edits:'#ea91b3',total_tokens:'#a28bf1',sam3:'#f2b86d',chat:'#82badb',analyses:'#b9a1e6',estimated_cost_usd:'#69d2b2'};
 function usageCharts(host,summary,daily=[]){
   const grid=element('div',undefined,'admin-chart-grid'),breakdown=element('section',undefined,'admin-chart'),trend=element('section',undefined,'admin-chart');
   breakdown.append(element('h3','Activity by action'),element('p','All recorded actions in this scope','chart-subtitle'));
@@ -72,12 +73,12 @@ function usageCharts(host,summary,daily=[]){
     bar.style.width=value/max*100+'%';bar.style.background=chartColors[key];track.append(bar);row.append(name,track,element('strong',prettyNumber(value)));breakdown.append(row);
   }
   const heading=element('div',undefined,'chart-heading'),select=element('select');select.setAttribute('aria-label','Daily chart metric');
-  for(const [value,label] of [['generations','Generations'],['tools','Tool activity'],['cost','Estimated cost']]){const option=element('option',label);option.value=value;select.append(option)}
+  for(const [value,label] of [['generations','Image generations'],['services','AI services'],['tokens','Reported tokens'],['tools','Tool activity'],['cost','Estimated cost']]){const option=element('option',label);option.value=value;select.append(option)}
   heading.append(element('h3','Last 30 days'),select);trend.append(heading,element('p','Daily totals · UTC','chart-subtitle'));
   const plot=element('div',undefined,'admin-chart-plot'),legend=element('div',undefined,'chart-legend');trend.append(plot,legend);
   const ns='http://www.w3.org/2000/svg',svgNode=(name,attrs)=>{const node=document.createElementNS(ns,name);for(const [key,value] of Object.entries(attrs))node.setAttribute(key,String(value));return node};
   function draw(){
-    const keys=select.value==='tools'?['wand','auto_create','mask_edits']:select.value==='cost'?['estimated_cost_usd']:['masking','master','harmonize'];
+    const keys=select.value==='tokens'?['total_tokens']:select.value==='services'?['sam3','chat','analyses']:select.value==='tools'?['wand','auto_create','mask_edits']:select.value==='cost'?['estimated_cost_usd']:['masking','master','harmonize'];
     const series=daily.slice(-30),values=series.map(day=>keys.reduce((sum,key)=>sum+Number(day[key]||0),0));
     const ceiling=Math.max(select.value==='cost'?.01:1,...values),svg=svgNode('svg',{viewBox:'0 0 640 245',role:'img','aria-label':'Daily '+select.options[select.selectedIndex].text+' for the last 30 days'});
     const title=svgNode('title',{});title.textContent=svg.getAttribute('aria-label');svg.append(title);
@@ -86,7 +87,7 @@ function usageCharts(host,summary,daily=[]){
     series.forEach((day,index)=>{
       let y=185;
       for(const key of keys){const value=Number(day[key]||0),height=value/ceiling*156;if(!height)continue;
-        y-=height;const bar=svgNode('rect',{x:57+index*step,y,width:Math.max(3,step-4),height,rx:2,fill:chartColors[key],tabindex:0});
+        y-=height;const bar=svgNode('rect',{x:57+index*step,y,width:Math.max(3,step-4),height,rx:2,fill:chartColors[key]||'#a28bf1',tabindex:0});
         const description=day.date+' · '+(operationLabels[key]||'Known estimated cost')+': '+(key==='estimated_cost_usd'?prettyMoney(value):value);
         const tooltip=svgNode('title',{});tooltip.textContent=description;bar.setAttribute('aria-label',description);bar.append(tooltip);svg.append(bar);
       }
@@ -119,7 +120,7 @@ function showProject(host,data){
   host.append(element('h3','Generation history'));
   table(host,data.generations.map(g=>({
     created_at:g.created_at,
-    edit_type:g.operation==='edit'?'Masking':g.operation==='master'?'Master':'Harmonize',
+    edit_type:({edit:'Masking',master:'Master',harmonize:'Harmonize',sam3:'SAM3',chat:'AI chat','object-map':'Object map'})[g.operation]||g.operation,
     status:g.status,quality:g.quality,model:g.model,
     input_tokens:prettyNumber(g.input_tokens),output_tokens:prettyNumber(g.output_tokens),
     total_tokens:prettyNumber(g.total_tokens),estimated_cost_usd:prettyMoney(g.estimated_cost_usd),

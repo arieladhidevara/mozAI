@@ -27,6 +27,7 @@
     }
   ],
   "rewrites": [
+    {"source":"/api/ai/reveal-context","destination":"/api/ai/generate?_mozai_mode=reveal-context"},
     {
       "source": "/api/ai/edit",
       "destination": "/api/ai/generate?_mozai_mode=edit"

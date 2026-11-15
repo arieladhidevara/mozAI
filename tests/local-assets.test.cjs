@@ -24,6 +24,17 @@ test('local server serves the browser model worker and its modules with JavaScri
   assert.match(source,/['"]\.mjs['"]\s*:\s*['"]text\/javascript/);
   assert.match(source,/['"]\.js['"]\s*:\s*['"]text\/javascript/);
 });
+test('local server serves every relative module imported by frontend assets',()=>{
+  for(const file of files){
+    if(!/\.(?:js|mjs)$/.test(file))continue;
+    const moduleSource=fs.readFileSync(path.join(root,file),'utf8');
+    for(const match of moduleSource.matchAll(/\b(?:from\s*|import\s*(?:\(\s*)?)['"](\.\/[^'"]+)['"]/g)){
+      const dependency=path.posix.join(path.posix.dirname(file),match[1]);
+      assert.ok(files.has(dependency),file+' imports '+dependency+' but localhost does not serve it');
+      assert.ok(fs.statSync(path.join(root,dependency)).isFile(),dependency+' does not exist');
+    }
+  }
+});
 test('local Auto Create uses same SAM 3 URL as production without exposing secrets',()=>{
   const dev=fs.readFileSync(path.join(root,'scripts/dev-server.js'),'utf8');
   const proxy=fs.readFileSync(path.join(root,'api/ai/sam3.js'),'utf8');

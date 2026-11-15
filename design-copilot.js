@@ -10,7 +10,7 @@ prompt.maxLength=4000;
 const chatPanel=$('chatPanel');
 if(chatPanel)chatPanel.append(chat);
 const corner=document.createElement('div');corner.className='canvas-corner-actions';corner.setAttribute('aria-label','Canvas controls');
-$('viewport')?.append(corner);
+document.querySelector('.main-panel')?.append(corner);
 for(const id of ['beforeBtn','zoomValue']){const item=$(id);if(item)corner.append(item)}
 for(const tool of document.querySelectorAll('.tool-row .tool'))tool.dataset.tip=tool.querySelector('span')?.textContent.trim()||tool.getAttribute('aria-label')||tool.title||'Tool';
 const wrap=$('canvasWrap'),layer=makeCanvas(1,1);layer.id='copilotHighlightLayer';layer.className='copilot-canvas-highlights';wrap.append(layer);

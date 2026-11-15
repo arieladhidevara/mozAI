@@ -48,7 +48,7 @@ def segment(image_data_uri: str, x: int, y: int) -> str:
         if not (1 <= w <= 1024 and 1 <= h <= 1024 and 0 <= x < w and 0 <= y < h):
             raise ValueError("Coordinates or image size out of bounds.")
         model, processor = gpu_model()
-        with torch.inference_mode():
+        with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             state = processor.set_image(image)
             masks, scores, _ = model.predict_inst(
                 state,
@@ -86,7 +86,7 @@ def segment_all(image_data_uri: str) -> str:
 
         model, processor = gpu_model()
         # Encode the image once. Reuse SAM 3's image features for grid prompts.
-        with torch.inference_mode():
+        with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             image_state = processor.set_image(image)
 
             def predict_at(px, py):
@@ -121,13 +121,14 @@ def segment_object(image_data_uri: str, label: str, left: float, top: float, rig
             raise ValueError("Invalid object region.")
         stage = "model"
         _, processor = gpu_model()
-        with torch.inference_mode():
+        with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             stage = "image"
             state = processor.set_image(image)
             stage = "text"
-            processor.set_text_prompt(label.strip(), state)
-            stage = "box"
-            result = processor.add_geometric_prompt([(left+right)/2/w, (top+bottom)/2/h, (right-left)/w, (bottom-top)/h], True, state)
+            # Keep semantic identity authoritative. A positive box can turn
+            # "person" into the whole seated person + chair region. Use the
+            # supplied box only to rank text-matching instances below.
+            result = processor.set_text_prompt(label.strip(), state)
         stage = "validate"
         # ZeroGPU inference may produce bfloat16 scores. NumPy cannot consume
         # bfloat16 tensors directly; normalize both outputs before validation.

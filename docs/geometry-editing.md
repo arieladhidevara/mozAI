@@ -53,3 +53,35 @@ This extends the current mozAI editor without Supabase project storage or a seco
 5. Add browser end-to-end tests with a configured SAM endpoint and architectural interior pairs.
 
 SAM inference and OpenAI image generation still require their configured services. Project storage does not require Supabase.
+
+
+## Object removal and manual ownership
+
+Remove on an original object uses the regional Edit crop and alpha mask. The
+snapshot omits overlapping created foreground objects; those layers remain in
+the displayed scene. Create cutouts still remove instantly without a model call.
+The Groups remove action uses the same reversible visual removal.
+
+After the image edit is accepted, the previous object becomes a selectable
+**Removed** region. Remove does not request SAM, infer labels, discover objects,
+or extend neighboring objects automatically. The reconstruction keeps the
+original mask as its unclaimed area.
+
+To assign pixels, select an existing object, choose a dashed Select tool with
+Add, and draw the desired portion of Removed. Only the intersection with the
+unclaimed area transfers to that object. The remaining pixels stay Removed.
+Appending the whole Removed object (Ctrl/Add) claims all remaining pixels.
+Ownership changes preserve RGB and do not generate another image. Future
+material edits use the owner's extended mask.
+
+Original / Removed switching withdraws and restores the dependent claims. Undo /
+Redo restores both masks together. The reconstruction, remaining mask, and
+manual assignments persist in `.moz`. Legacy version-2 ownership records remain
+readable; new removals use version 3 with manual ownership. Shape continues to
+use its existing SAM geometry workflow.
+
+`tests/removed-manual-scenarios.js` exercises the image-edit request, exact Select
+Add geometry, pixel preservation, later material editing, history and project
+round-trip. Provider responses are simulated and any SAM or reveal-label request
+in the manual Remove flow fails the scenario. Historical automatic-ownership
+scenarios remain in `tests/remove-reconstruction-scenarios.js`.

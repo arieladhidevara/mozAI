@@ -28,8 +28,8 @@ function labels(){
     const amount=policy.costs[quality],label=amount+' demo credit'+(amount===1?'':'s');
     document.querySelectorAll(selectors.join(',')).forEach(target=>{
       if(target.dataset.creditLabel!==label)target.dataset.creditLabel=label;
-      target.dataset.creditOperation=operation;
-      if(target.classList.contains('variant-action'))target.title='Regenerate this option · '+label;
+      if(target.dataset.creditOperation!==operation)target.dataset.creditOperation=operation;
+      if(target.classList.contains('variant-action')&&target.title!=='Regenerate this option · '+label)target.title='Regenerate this option · '+label;
     });
   }
   const quality=$('regionRenderQuality').value;

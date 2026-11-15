@@ -151,3 +151,48 @@
 /* Local recovery indicator in the project dropdown. */
 #projectMenu .recovery-menu-status{padding:7px 10px 9px;color:#a59cad;font:500 10px/1.45 Inter,system-ui,sans-serif;border-bottom:1px solid #ffffff14;margin-bottom:3px}
 #projectMenu #newProjectBtn{color:#e9e5f0}
+
+/* Canvas controls stay anchored to the visible editor, independent of zoom. */
+.main-panel{position:relative}
+.main-panel>.canvas-header{position:absolute!important;left:12px!important;bottom:34px!important;top:auto!important;right:auto!important;z-index:24;transform:none!important;margin:0!important}
+.canvas-wrap{flex-shrink:0}
+#quickAreaPromptForm.quick-area-prompt{display:flex!important;flex-direction:column!important;width:440px!important;min-width:0!important;max-width:calc(100vw - 24px);gap:9px;padding:12px!important;border-radius:14px!important;overflow:visible!important}
+#quickAreaPromptForm.hidden{display:none!important}
+#quickAreaPromptForm .quick-area-title{display:flex;align-items:center;gap:8px}
+#quickPromptObjectName{flex:1;font-size:11px;color:#c4becd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#quickAreaPromptForm .prompt-input-row{display:flex;align-items:center;gap:7px}
+#quickAreaPromptInput{flex:1;min-width:0;min-height:42px!important}
+#quickAreaPromptForm .quick-generate{flex:none;min-height:38px;padding:8px 12px}
+#quickAreaPromptForm .prompt-footer{display:flex;justify-content:flex-end;margin:0}
+#quickPromptMore{font-size:11px;color:#bcb2cc;border:0;background:transparent;cursor:pointer}
+#quickPromptMorePanel{position:absolute;left:calc(100% + 8px);top:0;width:170px;padding:12px;background:#19171e;border:1px solid #51475f;border-radius:12px;box-shadow:0 10px 32px #0008}
+#quickPromptMorePanel[hidden]{display:none!important}
+#quickPromptMorePanel .geometry-mode-switcher{display:flex;flex-direction:column;align-items:stretch;gap:10px}
+#quickPromptMorePanel label{font-size:11px;display:flex;flex-direction:column;gap:6px}
+#quickEditMode{background:#29252f;color:#eee;padding:8px;border:1px solid #51475f;border-radius:7px}
+#quickPromptMorePanel button{width:100%;margin-top:8px;font-size:11px}
+#quickGroupOptions{display:block;grid-column:auto;width:100%;border:0;padding:0}
+#quickGroupOptions[hidden]{display:none}
+#quickGroupOptions .quick-option-list{display:flex!important;flex-wrap:nowrap!important;overflow-x:auto!important;gap:8px;width:100%;padding:3px 1px 8px;scroll-snap-type:x proximity}
+#quickGroupOptions .quick-option{flex:0 0 88px;min-width:0;width:88px;display:flex;flex-direction:column;gap:5px;padding:7px;border:1px solid #49424f;border-radius:9px;background:#26212d;cursor:pointer;scroll-snap-align:start;transition:border-color .15s,background .15s}
+#quickGroupOptions .quick-option:hover{background:#393044;border-color:#b9a1e4}
+#quickGroupOptions .quick-option[aria-pressed=true]{border-color:#c49aff;background:#3b2b50;box-shadow:0 0 0 1px #c49aff55}
+#quickGroupOptions .quick-option img{width:70px;height:48px;object-fit:contain}
+#quickGroupOptions .quick-option span{max-width:100%;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.region-group.object-focused>.group-head{background:#a78bfa18;box-shadow:inset 3px 0 #c09afa}
+.region-group .group-options .variant-row{font-size:11px;min-height:38px;padding:5px 8px;margin-left:18px}
+.region-group .group-options .option-image{width:28px;height:28px;flex:0 0 28px}
+.region-group .group-options .option-image img{max-width:28px;max-height:28px}
+.region-group .group-options .variant-text{font-size:11px}
+@media(max-width:850px){#quickPromptMorePanel{left:auto;right:0;top:auto;bottom:calc(100% + 8px)}.main-panel>.canvas-header{bottom:12px!important}}
+
+.main-panel>.canvas-corner-actions{position:absolute!important;left:12px!important;bottom:32px!important;z-index:25!important;transform:none!important}
+
+#inspectorPanel .group-options .variant-row{min-height:40px!important;padding:5px 8px!important;font-size:11px!important;margin-left:18px}
+#inspectorPanel .group-options .option-image,#inspectorPanel .group-options .option-cutout{width:28px!important;min-width:28px!important;height:28px!important;max-height:28px!important;flex:0 0 28px!important}
+#quickPromptObjectName{text-align:left;font-weight:500}
+#quickGroupOptions .quick-option-list{max-height:none;overflow-y:hidden}
+
+#quickPromptMorePanel{display:flex;flex-direction:column;gap:6px}
+#quickPromptMorePanel .geometry-mode-switcher:not([hidden]){display:contents!important}
+#quickPromptMorePanel label{order:0}#bringObjectToFrontBtn{order:1}#geometryRemoveBtn{order:2}
