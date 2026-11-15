@@ -89,6 +89,7 @@ const publicFiles = new Set([
   'workspace-mobile.js',
   'geometry-mask.mjs',
   'object-map.js',
+  'object-instance-labels.mjs',
   'object-management.js',
   'object-grouping.mjs',
   'generated-image.mjs',
