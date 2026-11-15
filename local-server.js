@@ -90,6 +90,7 @@ const publicFiles = new Set([
   'geometry-mask.mjs',
   'object-map.js',
   'object-instance-labels.mjs',
+  'mobile-pinch.mjs',
   'object-management.js',
   'object-grouping.mjs',
   'generated-image.mjs',

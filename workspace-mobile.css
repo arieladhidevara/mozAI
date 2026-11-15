@@ -371,3 +371,66 @@
     stroke:#dbc8f1;
   }
 }
+
+
+/* Mobile gesture and composer polish: canvas owns touch gestures; keyboard
+   shrinks only the dock, never recenters the image or covers the input. */
+@media(max-width:850px){
+  .workspace .canvas-viewport{
+    touch-action:none!important;
+    padding:var(--moz-zoom-gutter-y,8px) var(--moz-zoom-gutter-x,8px)!important;
+  }
+  .workspace .canvas-viewport.is-pinching,.workspace .canvas-viewport.is-pinching #overlayCanvas{
+    cursor:grabbing!important;
+  }
+  #inspectorPanel .region-group.object-focused,
+  #inspectorPanel .region-group.region-focused{
+    border-color:#b99de9!important;
+    box-shadow:inset 0 0 0 1px #b99de980;
+  }
+  #mobileEditPane,#mobileToolPane,#mobileSettingsPane{scroll-padding-block:10px;min-width:0!important;}
+  #mobileEditPane .composition-chat,#mobileEditPane .chat-prompt-row,#mobileEditPane .quick-area-prompt{
+    min-width:0!important;max-width:100%!important;
+  }
+  #mobileEditPane .prompt-input-row textarea,#mobileEditPane .chat-prompt-row textarea{
+    min-width:0!important;max-width:100%!important;
+  }
+  html.moz-keyboard-open,
+  html.moz-keyboard-open.moz-sheet-expanded{
+    --moz-mobile-panel-height:min(205px,max(140px,calc(var(--moz-mobile-screen-height,100dvh) - var(--moz-mobile-top-height) - 100px)))!important;
+  }
+  html.moz-keyboard-open .workspace{
+    grid-template-rows:minmax(0,1fr) minmax(0,var(--moz-mobile-panel-height))!important;
+  }
+  html.moz-keyboard-open #inspectorPanel{
+    visibility:visible!important;
+    min-height:0!important;
+  }
+  html.moz-keyboard-open #inspectorPanel .mobile-bottom-tabs{
+    display:none!important;height:0!important;min-height:0!important;flex:0 0 0!important;
+    padding:0!important;border:0!important;overflow:hidden!important;
+  }
+  html.moz-keyboard-open #inspectorPanel[data-mobile-tab=ai]>#mobileEditPane{
+    padding:7px 10px 9px!important;gap:4px!important;overflow-y:auto!important;
+  }
+  html.moz-keyboard-open #mobileEditPane .mobile-ai-choices{
+    display:none!important;
+  }
+  html.moz-keyboard-open #mobileEditPane #quickAreaPromptForm{
+    padding:7px 9px!important;overflow:visible!important;
+  }
+  html.moz-keyboard-open #mobileEditPane #quickAreaPromptForm .quick-area-title,
+  html.moz-keyboard-open #mobileEditPane #quickAreaPromptForm .quick-group-options{
+    display:none!important;
+  }
+  html.moz-keyboard-open #mobileEditPane #quickAreaPromptForm textarea,
+  html.moz-keyboard-open #mobileEditPane .composition-chat textarea{
+    height:48px!important;min-height:46px!important;max-height:82px!important;
+  }
+  html.moz-keyboard-open #mobileEditPane .prompt-footer{
+    display:flex!important;align-items:center;flex-wrap:wrap;gap:5px!important;margin-top:3px!important;
+  }
+  html.moz-keyboard-open #inspectorPanel .mobile-status{
+    max-height:0!important;overflow:hidden!important;
+  }
+}
