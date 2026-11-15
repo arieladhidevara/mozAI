@@ -24,6 +24,17 @@ global.fetch=async(url,options)=>{
   let body;try{body=JSON.parse(options?.body||'{}')}catch{}
   if(body?.text?.format?.name==='edit_context')return Response.json({output_text:JSON.stringify({targetObject:'the selected table',confidence:.95})});
   if(body?.text?.format?.name==='object_map_categories')return Response.json({output_text:JSON.stringify({objects:[{id:1,category:'Wall',label:'wall'},{id:2,category:'Door',label:'door'},{id:3,category:'Floor',label:'floor'},{id:4,category:'Door',label:'second door'}]})});
+  if(body?.text?.format?.name==='instance_object_labels'){
+    const request=body.input?.[1]?.content?.find(item=>item.type==='input_text')?.text||'';
+    const ids=(request.match(/\d+/g)||[]).map(Number);
+    const named={
+      1:{category:'Wall',label:'Rear wall',group:'Building envelope'},
+      2:{category:'Door',label:'Left door',group:'Entry'},
+      3:{category:'Floor',label:'Main floor',group:'Entry'},
+      4:{category:'Door',label:'Right door',group:'Entry'}
+    };
+    return Response.json({output_text:JSON.stringify({objects:ids.map(id=>({id,...(named[id]||{category:'Other',label:'Physical item '+id,group:''})}))})});
+  }
   if(String(url).endsWith('/images/edits')){
     await new Promise(resolve=>setTimeout(resolve,140));
     if(body?.prompt?.includes('INSTANCE SEGMENTATION COLOR MAP')){
