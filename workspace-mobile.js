@@ -6,14 +6,13 @@ const $=id=>document.getElementById(id);
 const sidebar=$('inspectorPanel'),chat=$('compositionChat'),dock=chat?.parentElement;
 if(!sidebar||!chat||!dock)throw Error('Mobile workspace requires Groups and AI Edit.');
 const mobile=window.matchMedia('(max-width:850px)');
-const tabs=['groups','ai','settings'];
+const tabs=['groups','ai'];
 const nav=document.createElement('nav');
 nav.id='mobileBottomTabs';nav.className='mobile-bottom-tabs';
 nav.setAttribute('aria-label','Mobile workspace views');
 nav.innerHTML=[
   '<button type="button" data-mobile-tab="groups" aria-selected="true">▤ <span>Groups</span></button>',
-  '<button type="button" data-mobile-tab="ai" aria-selected="false">✧ <span>AI Edit</span></button>',
-  '<button type="button" data-mobile-tab="settings" aria-selected="false">⚙ <span>Settings</span></button>'
+  '<button type="button" data-mobile-tab="ai" aria-selected="false">✧ <span>Assistant</span></button>'
 ].join('');
 const editPane=document.createElement('section');
 editPane.id='mobileEditPane';editPane.setAttribute('aria-label','AI Edit composer');
@@ -28,6 +27,7 @@ function activate(next){
     button.setAttribute('aria-selected',String(selected));
     button.tabIndex=selected?0:-1;
   }
+  if(current==='ai'&&mobile.matches)syncAssistantContext();
   if(current==='groups'&&mobile.matches){
     const focused=$('groupList')?.querySelector('.region-group.selected');
     focused?.scrollIntoView?.({block:'nearest',inline:'nearest'});
@@ -68,38 +68,35 @@ sidebar.addEventListener('touchend',event=>{
   if(i>=0&&i<tabs.length)activate(tabs[i]);
 },{passive:true});
 sidebar.addEventListener('touchcancel',()=>{touch=null},{passive:true});
+// Keep the canvas height independent from Safari's visual viewport: only the
+// composer moves when the software keyboard appears.
 const viewport=window.visualViewport;
-let restingViewportHeight=viewport?.height||window.innerHeight;
+let restingHeight=window.innerHeight,restingWidth=window.innerWidth;
 function composerInput(){
-  const focused=document.activeElement;
-  return focused?.matches?.('input,textarea,[contenteditable=true]')&&
-    (editPane.contains(focused)||mobileSettingsPane?.contains(focused));
-}
-function keepComposerVisible(){
   const field=document.activeElement;
-  if(!mobile.matches||!field||!editPane.contains(field))return;
-  const panel=editPane.getBoundingClientRect(),input=field.getBoundingClientRect(),gap=9;
-  if(input.bottom>panel.bottom-gap)editPane.scrollTop+=input.bottom-panel.bottom+gap;
-  else if(input.top<panel.top+gap)editPane.scrollTop+=input.top-panel.top-gap;
+  return Boolean(field?.matches?.('input,textarea,[contenteditable=true]')&&editPane.contains(field));
 }
 function keyboard(){
-  if(!mobile.matches){document.documentElement.classList.remove('moz-keyboard-open');return;}
-  const focused=composerInput(),height=viewport?.height||window.innerHeight;
-  if(!focused)restingViewportHeight=Math.max(height,restingViewportHeight);
-  const lost=Math.max(restingViewportHeight-height,window.innerHeight-height-(viewport?.offsetTop||0));
-  const open=Boolean(focused&&lost>115);
-  document.documentElement.classList.toggle('moz-keyboard-open',open);
-  if(open)requestAnimationFrame(keepComposerVisible);
+  const root=document.documentElement;
+  if(!mobile.matches){root.classList.remove('moz-keyboard-open');return}
+  const vv=window.visualViewport,height=vv?.height||window.innerHeight,top=vv?.offsetTop||0;
+  const isTyping=composerInput(),hidden=Math.max(0,restingHeight-(top+height));
+  const open=Boolean(isTyping&&hidden>120);
+  if(!open&&!isTyping)restingHeight=window.innerHeight;
+  root.style.setProperty('--moz-mobile-screen-height',Math.round(restingHeight)+'px');
+  root.style.setProperty('--moz-mobile-visible-bottom',Math.round(top+height)+'px');
+  root.classList.toggle('moz-keyboard-open',open);
 }
 viewport?.addEventListener('resize',keyboard);
+viewport?.addEventListener('scroll',keyboard);
 editPane.addEventListener('focusin',event=>{
   if(!mobile.matches||!event.target.matches('input,textarea'))return;
   if(current!=='ai')activate('ai');
-  requestAnimationFrame(keepComposerVisible);
+  requestAnimationFrame(keyboard);
 });
 editPane.addEventListener('focusout',()=>requestAnimationFrame(keyboard));
 window.addEventListener('orientationchange',()=>{
-  requestAnimationFrame(()=>{updateLayout();keyboard();if(window.MosaicCore.state.master)window.MosaicCore.updateZoomFit();});
+  requestAnimationFrame(()=>{restingHeight=window.innerHeight;restingWidth=window.innerWidth;updateLayout();keyboard();window.MosaicCore?.updateZoomFit?.()});
 });
 window.MosaicMobile={activate,active:()=>current,isMobile:()=>mobile.matches};
 
@@ -140,53 +137,26 @@ function restoreDesktopNodes(){
   }
 }
 nav.innerHTML=[
-  '<button type="button" data-mobile-tab="groups" aria-selected="false">▤ <span>Groups</span></button>',
-  '<button type="button" data-mobile-tab="ai" aria-selected="false">✧ <span>Assistant</span></button>',
-  '<button type="button" data-mobile-tab="settings" aria-selected="false">⚙ <span>Settings</span></button>',
-  '<button type="button" id="mobileExpandPane" aria-label="Expand bottom panel" aria-pressed="false">⌃</button>'
+  '<button type="button" data-mobile-tab="groups" aria-selected="true">▤ <span>Groups</span></button>',
+  '<button type="button" data-mobile-tab="ai" aria-selected="false">✧ <span>Assistant</span></button>'
 ].join('');
-const expandButton=$('mobileExpandPane');
-function toggleExpand(force){
-  const expanded=typeof force==='boolean'?force:!document.documentElement.classList.contains('moz-sheet-expanded');
-  document.documentElement.classList.toggle('moz-sheet-expanded',expanded);
-  expandButton.textContent=expanded?'⌄':'⌃';
-  expandButton.setAttribute('aria-pressed',String(expanded));
-  expandButton.setAttribute('aria-label',expanded?'Collapse bottom panel':'Expand bottom panel');
-  if(mobile.matches&&window.MosaicCore?.state.master)
-    requestAnimationFrame(()=>window.MosaicCore.updateZoomFit());
+function syncAssistantContext(){
+  if(!mobile.matches||!areaForm)return;
+  const s=window.MosaicCore?.state;
+  const hasSelected=Boolean(s?.draftGroupId||s?.selectionGeometry||s?.objectSelectionParts?.length);
+  if(hasSelected&&areaForm.classList.contains('hidden')&&current==='ai')
+    window.MosaicCore?.showQuickPrompt?.(undefined,true,false);
+  editPane.dataset.composer=areaForm.classList.contains('hidden')?'full':'area';
 }
-expandButton.addEventListener('click',()=>toggleExpand());
-const aiChoices=document.createElement('div');
-aiChoices.className='mobile-ai-choices';
-aiChoices.innerHTML='<button type="button" data-ai-view="area">Selected area</button><button type="button" data-ai-view="full">Assistant</button>';
-editPane.prepend(aiChoices);
-let selectedAiView='full';
-function aiView(next,openArea=false){
-  selectedAiView=next==='area'?'area':'full';
-  editPane.dataset.aiView=selectedAiView;
-  for(const button of aiChoices.querySelectorAll('[data-ai-view]')){
-    button.setAttribute('aria-pressed',String(button.dataset.aiView===selectedAiView));
-  }
-  if(openArea&&selectedAiView==='area'&&areaForm.classList.contains('hidden')){
-    window.MosaicCore?.showQuickPrompt?.(undefined,true);
-    if(areaForm.classList.contains('hidden')){
-      selectedAiView='full';editPane.dataset.aiView='full';
-      aiChoices.querySelector('[data-ai-view="full"]').setAttribute('aria-pressed','true');
-      aiChoices.querySelector('[data-ai-view="area"]').setAttribute('aria-pressed','false');
-      window.MosaicCore?.toast?.('Select an object or draw an area first.');
-    }
-  }
-  if(selectedAiView==='full'&&!areaForm.classList.contains('hidden'))
-    window.MosaicCore?.hideQuickPrompt?.();
-}
-aiChoices.addEventListener('click',event=>{
-  const target=event.target.closest('[data-ai-view]');
-  if(target)aiView(target.dataset.aiView,true);
-});
+const contextNote=document.createElement('div');
+contextNote.id='mobileAssistantContext';
+contextNote.className='mobile-assistant-context';
+contextNote.setAttribute('aria-live','polite');
+contextNote.textContent='Editing entire image';
+editPane.append(contextNote);
 function mountMobileNodes(){
   if(!mobile.matches){
     restoreDesktopNodes();
-    document.documentElement.classList.remove('moz-sheet-expanded');
     return;
   }
   if(areaForm)editPane.insertBefore(areaForm,chat);
@@ -201,89 +171,37 @@ function mountMobileNodes(){
 mobile.addEventListener('change',mountMobileNodes);
 mountMobileNodes();
 activate('groups');
-aiView('full');
+syncAssistantContext();
 const areaWatch=new MutationObserver(()=>{
   if(!mobile.matches)return;
-  if(!areaForm.classList.contains('hidden')){
-    aiView('area');activate('ai');
-  }else if(selectedAiView==='area')aiView('full');
+  editPane.dataset.composer=areaForm.classList.contains('hidden')?'full':'area';
+  const group=window.MosaicCore?.state?.groups?.find(g=>g.id===window.MosaicCore?.state?.draftGroupId);
+  contextNote.textContent=areaForm.classList.contains('hidden')?'Editing entire image':(group?.name||'Selected object');
 });
 areaWatch.observe(areaForm,{attributes:true,attributeFilter:['class']});
-const geometryWatch=geometryReview?new MutationObserver(()=>{
-  if(mobile.matches&&!geometryReview.hidden){activate('ai');toggleExpand(true);}
-}):null;
-geometryWatch?.observe(geometryReview,{attributes:true,attributeFilter:['hidden']});
-if(sourcePanel){
-  const sourceWatch=new MutationObserver(()=>{
-    if(mobile.matches&&!sourcePanel.classList.contains('hidden')){
-      activate('settings');toggleExpand(true);
-    }
-  });
-  sourceWatch.observe(sourcePanel,{attributes:true,attributeFilter:['class']});
-}
+// Selection updates the available Assistant mode without switching the user's
+// Groups tab or resizing the panel.
 viewportCanvas.addEventListener('pointerup',()=>{
-  if(!mobile.matches)return;
-  requestAnimationFrame(()=>{
-    if(!areaForm.classList.contains('hidden')){activate('ai');return;}
-    const s=window.MosaicCore?.state;
-    if(s?.tool==='pan')return;
-    if(s?.draftGroupId||s?.focusedGroupId||s?.selectedPatchId)activate('groups');
-  });
+  if(mobile.matches&&current==='ai')requestAnimationFrame(syncAssistantContext);
 });
-const dockedDialogIds=['areaPromptDialog','harmonizeDialog','masterGenerateDialog',
-  'projectPromptDialog','helpDialog','sourcePreviewDialog','apiKeyDialog','creditsDialog'];
-const dialogOriginals=[];
-for(const id of dockedDialogIds){
-  const dialog=$(id);if(!dialog)continue;
-  const originalShow=dialog.showModal.bind(dialog),parent=dialog.parentElement,next=dialog.nextSibling;
-  dialogOriginals.push({dialog,parent,next});
-  dialog.showModal=function(){
-    if(!mobile.matches)return originalShow();
-    const target=['helpDialog','sourcePreviewDialog','apiKeyDialog','creditsDialog'].includes(id)?
-      mobileSettingsPane:editPane;
-    target.append(dialog);
-    dialog.classList.add('mobile-docked-dialog');
-    dialog.setAttribute('open','');
-    activate(target===editPane?'ai':'settings');
-    toggleExpand(true);
-    requestAnimationFrame(()=>dialog.querySelector('input,textarea,button')?.focus({preventScroll:true}));
-  };
-}
-mobile.addEventListener('change',()=>{
-  for(const item of dialogOriginals){
-    if(item.dialog.open)item.dialog.close();
-    if(!mobile.matches){
-      item.dialog.classList.remove('mobile-docked-dialog');
-      if(item.next?.parentElement===item.parent)item.parent.insertBefore(item.dialog,item.next);
-      else item.parent.append(item.dialog);
-    }
-  }
-});
-let lastMobileWidth=window.innerWidth;
+// Keep native modal dialogs native: opening settings/help must not rearrange
+// the two-tab mobile bottom panel.
 function updateVisibleHeight(){
-  const vv=window.visualViewport;
-  document.documentElement.style.setProperty('--moz-mobile-screen-height',
-    Math.round(mobile.matches&&vv?vv.height:window.innerHeight)+'px');
-  keyboard();
-  // Opening the virtual keyboard must not reset zoom or recenter the canvas.
   if(!mobile.matches)return;
-  const resizedWidth=lastMobileWidth!==window.innerWidth;
-  lastMobileWidth=window.innerWidth;
-  if(resizedWidth&&!composerInput()&&window.MosaicCore?.state.master)
-    requestAnimationFrame(()=>window.MosaicCore.updateZoomFit());
+  if(window.innerWidth!==restingWidth&&!composerInput()){
+    restingWidth=window.innerWidth;
+    restingHeight=window.innerHeight;
+    requestAnimationFrame(()=>window.MosaicCore?.updateZoomFit?.());
+  }
+  keyboard(); // No fit/recenter or canvas resize on keyboard-only changes.
 }
 window.visualViewport?.addEventListener('resize',updateVisibleHeight);
-window.addEventListener('orientationchange',()=>{
-  restingViewportHeight=window.visualViewport?.height||window.innerHeight;
-  requestAnimationFrame(updateVisibleHeight);
-});
+window.addEventListener('resize',updateVisibleHeight);
 mobile.addEventListener('change',updateVisibleHeight);
 updateVisibleHeight();
 window.MosaicMobile={activate,active:()=>current,isMobile:()=>mobile.matches,
-  openTools:()=>activate('tools'),openGroups:()=>activate('groups'),
-  openAI:()=>activate('ai'),expand:toggleExpand};
-
-// Selection modes are docked outside #tools on mobile, so retain their click behavior.
+  openTools:()=>{if(mobile.matches)$('tools')?.scrollIntoView?.({block:'nearest'})},
+  openGroups:()=>activate('groups'),openAI:()=>activate('ai'),expand:()=>{}};
 
 const groupList=$('groupList');
 // Tapping empty space in the Management sheet clears its focus and canvas preview.
