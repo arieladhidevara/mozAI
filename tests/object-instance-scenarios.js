@@ -7,7 +7,7 @@ window.runObjectInstanceChecks=async function(){
   const pixel=(x,y)=>[...core.composeApprovedCanvas().getContext('2d').getImageData(x,y,1,1).data];
   const native=window.fetch;let maps=0,edits=0,blue=false;
   window.fetch=async(path,options)=>{
-    if(path==='/api/ai/object-map')maps++;
+    if(path==='/api/ai/object-map'&&JSON.parse(options?.body||'{}').action!=='labels')maps++;
     if(path==='/api/ai/edit'){
       edits++;const result=await native(path,options);if(!blue||!result.ok)return result;
       const data=await result.json(),image=makeCanvas(256,256),x=image.getContext('2d');x.fillStyle='#0055ff';x.fillRect(0,0,256,256);data.image=image.toDataURL('image/png').split(',')[1];return Response.json(data);

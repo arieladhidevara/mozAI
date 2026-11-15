@@ -7,6 +7,7 @@ import {cropObjectLabel} from './object-mask-crop.mjs';
 import {buildObjectHitGrid,cropContainsPoint} from './object-hit-index.mjs';
 import {intersectObjectIds} from './object-intersections.mjs';
 import {prepareInstanceMap,readInstanceLabels} from './object-map-geometry.mjs';
+import {instanceLabelPages,applyInstanceLabels,makeInstanceContactSheet} from './object-instance-labels.mjs';
 const core=window.MosaicCore,{state,canvas,makeCanvas}=core;
 let labels=null,mapWidth=0,mapHeight=0,serial=0,busy=false,pendingBase=null,attemptedBase=null,picking=false,pickingIds=[],pickingMode='new',pendingClick=null,active=false,hoverId=0,hoverMask=null,heldImage=null,operation=null;
 let hitIndex=null,entryById=new Map(),sourceCropCache=new Map();
@@ -139,6 +140,52 @@ function baseLoaded(base){
   if(state.objectMap?.sourceKey===sourceKey(base)&&hydrate())return;
   state.objectMap=null;void prepareBase();
 }
+async function labelPreparedInstances(base,map,ticket){
+  const pages=instanceLabelPages(map.entries);
+  if(!pages.length)return;
+  const current=()=>serial===ticket&&state.objectMap===map&&state.master===base;
+  const labelsForSheet=readInstanceLabels(map);
+  const scale=Math.min(1,900/Math.max(base.width,base.height));
+  const original=makeCanvas(Math.max(1,Math.round(base.width*scale)),Math.max(1,Math.round(base.height*scale)));
+  original.getContext('2d').drawImage(base,0,0,original.width,original.height);
+  const originalJpeg=original.toDataURL('image/jpeg',.73);
+  let named=0,completed=0,failed=0;
+  for(const page of pages){
+    if(!current())return;
+    // Give the UI a frame to show progress before each contact sheet is built.
+    await new Promise(resolve=>requestAnimationFrame(resolve));
+    if(!current())return;
+    update('Naming objects… '+completed+'/'+map.entries.length);
+    let result;
+    try{
+      const sheet=makeInstanceContactSheet({source:base,raster:map.raster,entries:page,labels:labelsForSheet,makeCanvas});
+      result=await window.MosaicAuth.request('/api/ai/object-map',{
+        action:'labels',original:originalJpeg,sheet:sheet.toDataURL('image/jpeg',.82),ids:page.map(entry=>entry.id)
+      });
+    }catch(error){
+      failed++;
+      if(error.status===429){update('Objects ready · naming quota reached',false,true);break}
+    }
+    if(!current())return;
+    const changes=applyInstanceLabels(map,result?.objects||[],page.map(entry=>entry.id));
+    named+=changes.length;
+    completed+=page.length;
+    for(const entry of changes){
+      const group=state.groups.find(g=>g.objectMapKey===map.sourceKey&&g.objectMapObjectKey===entry.key);
+      if(!group)continue;
+      group.objectName=entry.label;
+      if(!group.manualName)group.name=entry.label.charAt(0).toUpperCase()+entry.label.slice(1);
+      if(!group.manualCategory){group.category=entry.category;group.objectMapCategory=entry.category}
+      group.suggestedCollection=entry.suggestedGroup||entry.category;
+    }
+    if(changes.length)core.renderGroups();
+  }
+  if(!current())return;
+  const needsReview=Array.isArray(map.qualityWarnings)&&map.qualityWarnings.length>0;
+  const suffix=named===map.entries.length?'Objects named':named?'Objects ready · '+named+'/'+map.entries.length+' named':'Objects ready · labels unavailable';
+  update(needsReview?suffix+' · review map quality':suffix,false,needsReview||failed>0);
+}
+
 async function prepareBase(force=false){
   const base=pendingBase||state.master;if(!base||base===heldImage||busy||(!force&&attemptedBase===base))return;
   if(state.objectMap?.sourceKey===sourceKey(base)&&!force&&hydrate())return;
@@ -153,7 +200,7 @@ async function prepareBase(force=false){
     window.MosaicMaskProgress?.show('objects','Preparing objects','Preparing the working image object map…');
     const target=objectMapSize(base.width,base.height),w=target.width,h=target.height;
     const sample=makeCanvas(w,h);sample.getContext('2d').drawImage(base,0,0,w,h);
-    const answer=await window.MosaicAuth.request('/api/ai/object-map',{image:sample.toDataURL('image/jpeg',.94)});
+    const answer=await window.MosaicAuth.request('/api/ai/object-map',{image:sample.toDataURL('image/jpeg',.94),labelMode:'instances'});
     if(ticket!==serial||state.master!==base)return;
     const image=new Image();image.src='data:image/png;base64,'+answer.image;await image.decode();
     if(image.width!==w||image.height!==h)throw Error('The object map changed image dimensions. Retry objects.');
@@ -166,6 +213,11 @@ async function prepareBase(force=false){
     (state.objectMaps??={})[state.objectMap.sourceKey]=state.objectMap;
     hydrate();
     if(pendingClick&&active){const pending=pendingClick;pendingClick=null;selectAt(pending.point,pending.options)}
+    if(ticket===serial&&state.objectMap?.entries?.length){
+      update('Naming objects… 0/'+state.objectMap.entries.length);
+      try{await labelPreparedInstances(base,state.objectMap,ticket)}
+      catch{if(ticket===serial)update('Objects ready · labels unavailable',false,true)}
+    }
   }catch(error){if(ticket===serial){
     update(error.message||'Object preparation failed',true);
     for(const waiter of preparedWaiters)

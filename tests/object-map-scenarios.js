@@ -6,7 +6,7 @@ window.runObjectMapChecks=async function(){
   const nativeFetch=window.fetch,capture=Element.prototype.setPointerCapture;Element.prototype.setPointerCapture=()=>{};
   let maps=0,edits=0,sam=0,intent=0,release,hold=false,payload;
   window.fetch=async(path,options)=>{
-    if(path==='/api/ai/object-map')maps++;
+    if(path==='/api/ai/object-map'&&JSON.parse(options?.body||'{}').action!=='labels')maps++;
     if(path==='/api/ai/sam3')sam++;
     if(path==='/api/ai/object-intent')intent++;
     if(path==='/api/ai/edit'){edits++;payload=JSON.parse(options.body);const response=await nativeFetch(path,options);if(hold)await new Promise(resolve=>{release=resolve});return response}
@@ -29,6 +29,8 @@ window.runObjectMapChecks=async function(){
     await wait(()=>Boolean(state.reference),'Base upload');await pause(120);assert(maps===0&&!state.objectMap,'Uploading Base started mapping before Continue or Generate');
     $('welcomeContinueBtn').click();await wait(()=>state.masterIsBase,'Base-only canvas');
     await wait(()=>state.objectMap?.entries?.length===4,'background map');
+    await wait(()=>state.objectMap?.labelsAvailable===true,'instance labeling');
+    assert(state.objectMap.entries.some(e=>e.label==='Left door')&&state.objectMap.entries.some(e=>e.label==='Right door'),'Distinct instances did not receive individual names');
     assert(maps===1&&state.groups.length===4&&state.objectCollections.length===0&&state.patches.size===0,'Map did not create independent ungrouped objects');
     assert(state.objectMap.raster.width*state.objectMap.raster.height>=1048576,'Object map is below the model pixel budget');
     assert($('selectedObjectOverlay').hidden,'Prepared masks appeared before selection');
