@@ -1,5 +1,6 @@
 const {send,guard}=require('../lib/auth');
 const store=require('../lib/data-store');
+const {sendInvitationEmail}=require('../lib/invitation-email');
 module.exports=async function(req,res){
   if(!await guard(req,res,req.method==='GET'?'GET':'POST',{admin:true}))return;
   try{
@@ -16,7 +17,15 @@ module.exports=async function(req,res){
     if(body.action==='invite'){
       const result=await store.createInvitation(req.account,body);
       // The plaintext token is returned once; only its SHA-256 digest is stored.
-      return send(res,201,result);
+      // Failed delivery must not lose the valid invitation link or invite the admin to retry blindly.
+      const delivery=await sendInvitationEmail({
+        email:result.invitation.email,
+        label:result.invitation.label,
+        token:result.token,
+        id:result.invitation.id,
+        origin:process.env.MOSAIC_APP_ORIGIN||req.headers.origin
+      });
+      return send(res,201,{...result,delivery});
     }
     if(body.action==='revoke')return send(res,200,await store.revokeInvitation(req.account,body.id));
     if(body.action==='reset')return send(res,200,await store.reset(req.account));
