@@ -4,8 +4,14 @@ Continue with Base only, an uploaded working Master, or a finished generated
 Master starts one background `gpt-image-2.6-sunburst` image edit when the saved
 BYOK connection is ready. Base upload alone and the provisional Base shown
 during initial Master generation do not start mapping. `/api/ai/object-map` requests a flat
-PNG in a fixed 64-color palette at the submitted dimensions. A lightweight
-`gpt-4.1-mini` vision call assigns Group categories. Both are billable calls.
+PNG in a fixed 64-color palette at the submitted dimensions. After spatial instance cleanup, `gpt-4.1-mini` labels per-instance contact sheets
+(24 object crops per sheet, at most eight sheets for the largest objects), with
+the original scene as context. Unlike the former color-ID legend, two distant
+objects that share a palette color can receive different names and categories.
+Each sheet is one billable vision call, not one call per object. New maps skip
+the obsolete color-legend API call; existing saved maps keep their labels.
+If labeling fails, all masks stay selectable with generic names, and existing
+manual names/categories are preserved.
 The browser validates dimensions and decodes even off-palette colors to internal
 Object IDs, then saves the index raster and categories in `.moz`. Exact palette
 matching is not required. Single-color or textured outputs receive nonblocking
