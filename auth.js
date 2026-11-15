@@ -5,7 +5,8 @@ const dialog=$('apiKeyDialog'),form=$('apiKeyForm'),button=$('apiKeyStatusBtn');
 let connected=false,owner=null,checked=false,loading=null,epoch=0,validation=0,initialPromptFor=null;
 const validKey=value=>/^sk-[\w-]{15,300}$/.test(value);
 function updateButton(){
-  button.textContent=connected?'Image AI ✓':'Image AI';
+  button.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 10V7a4 4 0 1 1 4 4H6v4h3v3h3v-3h2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="13" cy="7" r="1" fill="currentColor"/></svg>';
+  button.dataset.connected=String(connected);
   button.title=connected?'Manage OpenAI image-generation key':'Connect OpenAI for image generation';
   button.setAttribute('aria-label',button.title);
   button.classList.toggle('premium-active',connected);
