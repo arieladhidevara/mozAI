@@ -32,7 +32,7 @@ module.exports=async function handler(req,res){
   }};
   const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),27000);
   try{
-    const response=await require('../../lib/provider-telemetry').observedFetch(req,'object-labels','gpt-4.1-mini','https://api.openai.com/v1/responses',{
+    const response=await require('../../lib/provider-telemetry').observedFetch(req,'object-map','gpt-4.1-mini','https://api.openai.com/v1/responses',{
       method:'POST',signal:controller.signal,headers:{'Authorization':'Bearer '+req.openAiApiKey,'Content-Type':'application/json'},
       body:JSON.stringify({model:'gpt-4.1-mini',store:false,max_output_tokens:3800,
         text:{format:{type:'json_schema',name:'instance_object_labels',strict:true,schema}},
