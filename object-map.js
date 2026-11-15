@@ -159,8 +159,8 @@ async function labelPreparedInstances(base,map,ticket){
     let result;
     try{
       const sheet=makeInstanceContactSheet({source:base,raster:map.raster,entries:page,labels:labelsForSheet,makeCanvas});
-      result=await window.MosaicAuth.request('/api/ai/object-labels',{
-        original:originalJpeg,sheet:sheet.toDataURL('image/jpeg',.82),ids:page.map(entry=>entry.id)
+      result=await window.MosaicAuth.request('/api/ai/object-map',{
+        action:'labels',original:originalJpeg,sheet:sheet.toDataURL('image/jpeg',.82),ids:page.map(entry=>entry.id)
       });
     }catch(error){
       failed++;
