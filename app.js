@@ -151,7 +151,7 @@ function positionQuickPrompt(point=state.lastCanvasPointer){
   form.style.maxHeight=Math.max(120,available.bottom-available.top)+'px';
   // The small-screen UI docks this form in its own AI pane.
   if(form.closest('#mobileEditPane'))return;
-  const bounds=form.getBoundingClientRect(),w=bounds.width,h=bounds.height;
+  const bounds=form.getBoundingClientRect(),w=bounds.width+(form.classList.contains('more-open')?$('quickPromptMorePanel').getBoundingClientRect().width:0),h=bounds.height;
   const image=overlay.getBoundingClientRect();
   const selected={
     left:image.left+selection.x/canvas.width*image.width,
@@ -169,6 +169,22 @@ function positionQuickPrompt(point=state.lastCanvasPointer){
     if(x+w<=selected.left||x>=selected.right||y+h<=selected.top||y>=selected.bottom)target={x,y};
   }
   form.style.left=target.x+'px';form.style.top=target.y+'px';
+}
+function toggleQuickMore(){
+  const form=$('quickAreaPromptForm'),panel=$('quickPromptMorePanel'),button=$('quickPromptMore');
+  const opening=panel.hidden,before=form.getBoundingClientRect();
+  if(opening){form.dataset.moreLeft=before.left;form.dataset.moreTop=before.top;}
+  panel.hidden=!opening;form.classList.toggle('more-open',opening);
+  button.textContent=opening?'Less':'More';button.setAttribute('aria-expanded',String(opening));
+  if(form.closest('#mobileEditPane'))return;
+  const viewport=$('viewport').getBoundingClientRect(),left=Math.max(10,viewport.left+10),right=Math.min(innerWidth-10,viewport.right-10);
+  if(opening){
+    const width=panel.getBoundingClientRect().width,overflow=before.right+width-right;
+    if(overflow>0)form.style.left=Math.max(left,before.left-overflow)+'px';
+  }else{
+    form.style.left=Math.max(left,Math.min(Number(form.dataset.moreLeft),right-before.width))+'px';
+    form.style.top=form.dataset.moreTop+'px';
+  }
 }
 function showQuickPrompt(point=state.lastCanvasPointer,keepText=false,focusInput=true){
   if(window.MosaicWorkspace?.isSelectingResult())return;
@@ -598,6 +614,8 @@ function selectGroupMask(group,{showOutline=false,append=false}={}){
 }
 function focusGroupInSidebar(group){
   if(!group)return;
+  const search=$('groupSearch'),row=[...document.querySelectorAll('.region-group')].find(node=>node.dataset.group===group.id);
+  if(search?.value&&(!row||row.hidden)){search.value='';filterGroups();}
   state.focusedGroupId=group.id;state.expandedObjectId=group.id;renderGroups();
   document.querySelectorAll('.region-group').forEach(row=>row.classList.toggle('object-focused',row.dataset.group===group.id));
   const list=$('groupList'),section=[...list.querySelectorAll('.region-group')].find(row=>row.dataset.group===group.id);
@@ -1439,6 +1457,7 @@ function renderGroups(){
   }
   if(plan.full||plan.replace.length||plan.update.length)
     window.MosaicPremium?.decorateActive?.();
+  filterGroups();
   sidebarSnapshot=snapshot;
   // The floating Option rail is separate from the sidebar. Refresh it only
   // when the selected group's Options change, not on unrelated UI redraws.
@@ -1452,6 +1471,29 @@ function renderGroups(){
     })]);
   if(sidebarQuickKey!==quickKey){sidebarQuickKey=quickKey;refreshQuickOptions()}
   updateSourceActions();
+}
+function filterGroups(){
+  const query=($('groupSearch')?.value||'').trim().toLocaleLowerCase(),list=$('groupList');
+  let found=0;
+  for(const node of list.querySelectorAll('.region-group[data-group]')){
+    const group=state.groups.find(g=>g.id===node.dataset.group);if(!group)continue;
+    const collection=(state.objectCollections||[]).find(c=>c.id===group.collectionId);
+    const text=[group.name,group.objectName,collection?.name,...group.patchIds.map(id=>state.patches.get(id)?.name)].join(' ').toLocaleLowerCase();
+    node.hidden=Boolean(query&&!text.includes(query));if(!node.hidden)found++;
+  }
+  for(const category of list.querySelectorAll('.object-category')){
+    const matches=[...category.querySelectorAll('.region-group')].some(node=>!node.hidden);
+    category.hidden=Boolean(query&&!matches);
+    const items=category.querySelector('.object-category-items');
+    if(items)items.hidden=query?!matches:(category.querySelector('[aria-expanded]')?.getAttribute('aria-expanded')==='false');
+  }
+  $('groupSearchStatus').textContent=query?(found?'Showing '+found+' matching object'+(found===1?'':'s'):'No matching objects or groups'):'';
+}
+$('groupSearch').addEventListener('input',filterGroups);
+for(const button of document.querySelectorAll('#tools .selection-toolset .tool,#tools .create-toolset .tool,#tools .layer-toolset .tool')){
+  for(const node of [...button.childNodes])if(node.nodeType===Node.TEXT_NODE&&node.textContent.trim()){
+    const glyph=document.createElement('span');glyph.className='tool-glyph';glyph.setAttribute('aria-hidden','true');glyph.textContent=node.textContent.trim();node.replaceWith(glyph);
+  }
 }
 function editExisting(pid){if(state.pendingSourceId){toast('Apply or discard your new image before editing saved variants.');return}const patch=state.patches.get(pid);if(!patch)return;state.editingPatchId=pid;state.selectedPatchId=pid;resetSelection();state.selectionPoints=patchControlPoints(patch).map(({x,y})=>({x,y}));state.selectionMask.getContext('2d').drawImage(displayedPatchMask(patch),0,0);setMode('add');selectTool('lasso');updateSelectionOutline();updateApplyButton();message('Editing a saved mask. Refine it, then click Update mask to commit changes.')}
 function groupEvent(e){if(window.MosaicRegions?.handleGroupEvent(e))return;if(window.MosaicPremium?.handleGroupEvent(e))return;const target=e.target.closest('[data-action]');if(!target)return;const action=target.dataset.action,group=state.groups.find(g=>g.id===target.dataset.group),pid=target.dataset.patch;
@@ -2584,6 +2626,6 @@ viewport.addEventListener('wheel',event=>{
   if(state.shapeStart)state.shapeEnd=canvasPoint(event,false);drawOverlay();
 },{passive:false});
 window.addEventListener('mosaic:keyconnected',()=>state.groups.forEach(autoClassifyGroup));
-window.MosaicCore = {materialEditSnapshot,bringObjectToFront,compactPatchMask,compactAllOptionMasks,fullPatchMask,expandPatchMask,selectionBounds,ensureSelectionMask,selectionContainsPoint,groupMaskCrop,compactOptionSource,expandOptionSource,sameMaskGeometry,shareMaterialOptionMask,shareSavedOptionMasks,detachSharedOptionMask,groupContainsPoint,appendGroupSelection,newGroup,newGroupFromCrop,matchingGroup,applyWandMask,svgNode,vectorLayer,drawVectorPaths,maskPathsFromRaster,maskPathsFromCrop,state,canvas,overlay,ctx,makeCanvas,uid,setProjectTitle,toast,message,promptText,loadFileToCanvas,setMaster,continueWithBase,upgradeBaseDraft,setSourcePreview,updateSourceActions,render,composeApprovedCanvas,renderGroups,drawPatch,selectTool,setMode,clearObjectSelection,updateApplyButton,maskBoundingBox,assignGroup,resetSelection,updateSelectionOutline,trimUndo,updateMaskWithLasso,updateZoomFit,escapeHTML,categoryFromText,updateGroupCategory,optionNameFromPrompt,prepareSelectionGroup,groupMask,selectGroupMask,CATEGORIES,showQuickPrompt,hideQuickPrompt,createBlankRegion,moveOptionToGroup,displayedPatchMask,renderedPatchLayer,refreshGroupFootprint,invalidateDisplayedMask,attachGeneratedSelection,patchSelectionPaths,exactMaskBoundingBox,unwarpPatchSelection,patchControlPoints,displayedMaskPoint};
+window.MosaicCore = {toggleQuickMore,materialEditSnapshot,bringObjectToFront,compactPatchMask,compactAllOptionMasks,fullPatchMask,expandPatchMask,selectionBounds,ensureSelectionMask,selectionContainsPoint,groupMaskCrop,compactOptionSource,expandOptionSource,sameMaskGeometry,shareMaterialOptionMask,shareSavedOptionMasks,detachSharedOptionMask,groupContainsPoint,appendGroupSelection,newGroup,newGroupFromCrop,matchingGroup,applyWandMask,svgNode,vectorLayer,drawVectorPaths,maskPathsFromRaster,maskPathsFromCrop,state,canvas,overlay,ctx,makeCanvas,uid,setProjectTitle,toast,message,promptText,loadFileToCanvas,setMaster,continueWithBase,upgradeBaseDraft,setSourcePreview,updateSourceActions,render,composeApprovedCanvas,renderGroups,drawPatch,selectTool,setMode,clearObjectSelection,updateApplyButton,maskBoundingBox,assignGroup,resetSelection,updateSelectionOutline,trimUndo,updateMaskWithLasso,updateZoomFit,escapeHTML,categoryFromText,updateGroupCategory,optionNameFromPrompt,prepareSelectionGroup,groupMask,selectGroupMask,CATEGORIES,showQuickPrompt,hideQuickPrompt,createBlankRegion,moveOptionToGroup,displayedPatchMask,renderedPatchLayer,refreshGroupFootprint,invalidateDisplayedMask,attachGeneratedSelection,patchSelectionPaths,exactMaskBoundingBox,unwarpPatchSelection,patchControlPoints,displayedMaskPoint};
 Object.assign(window.MosaicCore,{focusGroupInSidebar,chooseGroupOption,groupChoiceVersion,toggleComparison,canCreateSelection,releaseSourceTexture,releasePatchTexture});
 promptText();

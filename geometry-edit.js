@@ -20,7 +20,7 @@ switcher.setAttribute('aria-label','Edit mode');
 switcher.innerHTML='<label>Edit <select id="quickEditMode"><option value="material">Material</option><option value="shape">Shape</option></select></label><button type="button" id="geometryRemoveBtn" title="Remove the selected object">Remove object</button>';
 $('quickPromptMorePanel').append(switcher);
 $('quickEditMode').addEventListener('change',event=>setMode(event.target.value));
-$('quickPromptMore').addEventListener('click',()=>{const panel=$('quickPromptMorePanel');panel.hidden=!panel.hidden;promptForm.classList.toggle('more-open',!panel.hidden);$('quickPromptMore').setAttribute('aria-expanded',String(!panel.hidden));core.showQuickPrompt(state.lastCanvasPointer,true,false);});
+$('quickPromptMore').addEventListener('click',()=>core.toggleQuickMore());
 const modeHint=document.createElement('p');
 modeHint.className='geometry-mode-hint';
 switcher.after(modeHint);

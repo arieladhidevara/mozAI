@@ -12,7 +12,7 @@ if(chatPanel)chatPanel.append(chat);
 const corner=document.createElement('div');corner.className='canvas-corner-actions';corner.setAttribute('aria-label','Canvas controls');
 document.querySelector('.main-panel')?.append(corner);
 for(const id of ['beforeBtn','zoomValue']){const item=$(id);if(item)corner.append(item)}
-for(const tool of document.querySelectorAll('.tool-row .tool'))tool.dataset.tip=tool.querySelector('span')?.textContent.trim()||tool.getAttribute('aria-label')||tool.title||'Tool';
+for(const tool of document.querySelectorAll('.tool-row .tool'))tool.dataset.tip=tool.querySelector('span:not(.tool-glyph)')?.textContent.trim()||tool.getAttribute('aria-label')||tool.title||'Tool';
 const wrap=$('canvasWrap'),layer=makeCanvas(1,1);layer.id='copilotHighlightLayer';layer.className='copilot-canvas-highlights';wrap.append(layer);
 state.copilotSession??=null;
 let revision=0,busy=false,highlighted=[],pointed=null,pointerStart=null;
@@ -389,7 +389,7 @@ async function submit(event){
       }else beginReview(m,plan.targetIds);
     }else{
       highlight(plan.targetIds);renderThread();
-      status.textContent=plan.targetIds.length?plan.targetIds.length+' objects highlighted':'Design advice ready';
+      status.textContent=plan.targetIds.length?plan.targetIds.length+' objects highlighted':'';
       if(plan.action==='group')group(plan.targetIds,plan.groupName);
     }
     // Image calls require the explicit Preview / Generate button below the advice.

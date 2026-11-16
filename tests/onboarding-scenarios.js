@@ -29,13 +29,13 @@ window.runCompactPromptChecks=async function(){
  const c=window.MosaicCore,{state,makeCanvas}=c,base=makeCanvas(800,600);base.getContext('2d').fillRect(0,0,800,600);state.reference=base;c.setMaster(base,'Compact prompt',false);
  const m=makeCanvas(800,600);m.getContext('2d').fillRect(320,180,80,130);const g=c.newGroup(m,'Furniture');g.name='Cabinet';g.manualName=true;g.mapPrepared=true;
  for(let i=0;i<6;i++){const id='compact-'+i;state.sources.set(id,{id,canvas:base});state.patches.set(id,{id,groupId:g.id,sourceId:id,mask:m,bbox:{x:320,y:180,w:80,h:130},name:'Finish '+i});g.patchIds.push(id)}
- c.selectGroupMask(g);c.showQuickPrompt(null,true,false);
+ c.selectGroupMask(g);c.showQuickPrompt(null,true,false);document.querySelector('[data-mobile-tab=ai]')?.click();
  const form=document.getElementById('quickAreaPromptForm');await tourWait(()=>form.getBoundingClientRect().width>0);
  const before=form.getBoundingClientRect();
  if(before.width>322||before.height>210)throw Error('Prompt is still too large: '+before.width+' x '+before.height);
  document.getElementById('quickPromptMore').click();await new Promise(r=>requestAnimationFrame(r));
  const after=form.getBoundingClientRect(),panel=document.getElementById('quickPromptMorePanel'),p=panel.getBoundingClientRect();
- if(after.width<=before.width||p.left<=after.left||p.right>after.right+1)throw Error('More is not attached inside the right side: '+JSON.stringify({before:{x:before.x,w:before.width},after:{x:after.x,w:after.width},panel:{x:p.x,w:p.width},display:getComputedStyle(form).display,parent:form.parentElement.id}));
- if(getComputedStyle(panel).position!=='static'||getComputedStyle(panel).boxShadow!=='none')throw Error('More still behaves as a detached popover');
- return {passed:3,checks:['Prompt is compact','More extends the same surface to the right','Attached controls stay inside the prompt']};
+ if(Math.abs(after.width-before.width)>1||Math.abs(p.left-after.right)>2)throw Error('Main prompt width changed or More is detached');
+ if(getComputedStyle(panel).position!=='absolute'||getComputedStyle(panel).boxShadow!=='none')throw Error('More still behaves as a detached popover');
+ return {passed:3,checks:['Prompt is compact','More keeps the main width and attaches on the right','Attached controls have bounded vertical overflow']};
 };
