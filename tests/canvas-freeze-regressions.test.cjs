@@ -21,7 +21,7 @@ test('Create keeps cropped PNG placement after SAM subject cleanup',()=>{
   assert.match(premium,/refineCreateCutout\(image,intent\.targets/);
   assert.match(premium,/maskAlignmentStatus=segmentation\?'sam3-smooth':'png-alpha'/);
   assert.match(premium,/prepareCroppedCreateLayer\(image,region,rgba\)/);
-  assert.match(premium,/import \{planCreateAlphaCrop\} from '\.\/create-alpha\.mjs'/);
+  assert.match(premium,/import \{[^}]*planCreateAlphaCrop[^}]*\} from '\.\/create-alpha\.mjs'/);
   assert.match(premium,/existing\.createCleanupWarning=cleanupWarning/);
 });
 

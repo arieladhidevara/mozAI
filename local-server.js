@@ -81,6 +81,8 @@ const publicFiles = new Set([
   'object-aware.js',
   'geometry-edit.js',
   'object-reconstruction.js',
+  'object-paint.js',
+  'paint-color.mjs',
   'reveal-ownership.mjs',
   'scene-targeting.js',
   'scene-versioning.js',

@@ -9,6 +9,19 @@ export function alphaBounds(pixels,width,height,minAlpha=96){
   }
   return maxX<0?null:{x:minX,y:minY,width:maxX-minX+1,height:maxY-minY+1};
 }
+// Fit the complete alpha silhouette, including soft shadows, into the user's
+// placement box. Preserve aspect ratio and existing size when it already fits.
+export function planCreatePlacement(alpha,region,target){
+  if(!alpha||!region||!target||![target.x,target.y,target.w,target.h].every(Number.isFinite)||target.w<1||target.h<1)throw new TypeError('Invalid Create placement box');
+  const left=Math.ceil(target.x),top=Math.ceil(target.y),right=Math.floor(target.x+target.w),bottom=Math.floor(target.y+target.h);
+  const scale=Math.min(1,(right-left)/alpha.width,(bottom-top)/alpha.height);
+  if(!(scale>0))throw new TypeError('Invalid Create placement size');
+  const w=alpha.width*scale,h=alpha.height*scale;
+  const centerX=region.x+alpha.x+alpha.width/2,centerY=region.y+alpha.y+alpha.height/2;
+  const x=Math.max(left,Math.min(right-Math.ceil(w),Math.round(centerX-w/2)));
+  const y=Math.max(top,Math.min(bottom-Math.ceil(h),Math.round(centerY-h/2)));
+  return {scale,source:{...alpha},destination:{x,y,w,h},changed:scale<1||x!==region.x+alpha.x||y!==region.y+alpha.y};
+}
 // A pure crop plan: preserve original PNG alpha but only rasterize the new
 // object's local silhouette. Coordinates returned for source and mask are in
 // the same full scene without allocating full-scene RGBA arrays.

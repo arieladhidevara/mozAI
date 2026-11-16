@@ -5,7 +5,9 @@ let revision=0;
 const maskCache=new WeakMap();
 const cropCache=new WeakMap(),textureCache=new WeakMap(),thumbnailCache=new WeakMap();
 const copy=source=>{const c=makeCanvas(source.width,source.height);c.getContext('2d').drawImage(source,0,0);return c};
-function active(event){return state.groups.some(g=>g.id===event.groupId&&g.active===event.patchId)&&event.enabled!==false}
+function shapeOrigin(patch){return patch?.localOption&&patch.editMode==='shape'&&patch.localShapeOrigin||patch?.id}
+function active(event){return state.groups.some(g=>g.id===event.groupId&&(g.active===event.patchId||
+  event.operation==='shape'&&shapeOrigin(state.patches.get(g.active))===event.patchId))&&event.enabled!==false}
 function events(){return (state.objectReconstruction?.events||[]).filter(e=>e.ownershipVersion>=2)}
 function removedEvent(group){return events().find(e=>e.ownershipVersion===3&&e.operation==='remove'&&e.groupId===group?.id&&active(e))}
 function isRemovedRegion(group){return Boolean(removedEvent(group))}
@@ -59,7 +61,7 @@ function drawGroup(target,group){
 }
 function drawOption(target,group,patch,source){
   const inactive=related(group).filter(({event})=>!active(event));
-  const shape=patch.geometryObjectMask&&events().some(e=>e.patchId===patch.id&&e.operation==='shape');
+  const shape=patch.geometryObjectMask&&events().some(e=>e.patchId===shapeOrigin(patch)&&e.operation==='shape');
   if(!inactive.length&&!shape)return false;
   const layer=makeCanvas(canvas.width,canvas.height);core.drawPatch(layer.getContext('2d'),patch,source);
   const ctx=layer.getContext('2d');
@@ -116,10 +118,20 @@ function thumbnail(group){
   thumb.getContext('2d').drawImage(image,bounds.x,bounds.y,bounds.w,bounds.h,0,0,thumb.width,thumb.height);
   const url=thumb.toDataURL('image/png');thumbnailCache.set(group,{revision,url});return url;
 }
-function snapshot(){return {groups:state.groups.map(g=>({...g,patchIds:[...g.patchIds]})),patches:new Map(state.patches),sources:new Map(state.sources),reconstruction:state.objectReconstruction?{...state.objectReconstruction,events:[...state.objectReconstruction.events]}:null}}
+function snapshot({pinActiveSources=false}={}){
+  const sources=new Map(state.sources);
+  // RGB replaced by local Paint must remain available to Undo even after the
+  // live inactive source is offloaded. Keep immutable references, not pixel copies.
+  if(pinActiveSources)for(const group of state.groups){
+    const sourceId=state.patches.get(group.active)?.sourceId,source=sources.get(sourceId);
+    if(source)sources.set(sourceId,{...source});
+  }
+  return {groups:state.groups.map(g=>({...g,patchIds:[...g.patchIds]})),patches:new Map(state.patches),sources,
+    reconstruction:state.objectReconstruction?{...state.objectReconstruction,events:[...state.objectReconstruction.events]}:null};
+}
 function restoreHistory(entry,to){
-  if(entry.type!=='object-reconstruction')return false;
-  to.push({type:entry.type,value:snapshot()});
+  if(!['object-reconstruction','object-option'].includes(entry.type))return false;
+  to.push({type:entry.type,value:snapshot({pinActiveSources:entry.type==='object-option'})});
   Object.assign(state,{groups:entry.value.groups,patches:entry.value.patches,sources:entry.value.sources,objectReconstruction:entry.value.reconstruction});
   sync();core.resetSelection();window.MosaicRecovery?.markChanged?.();return true;
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {alphaBounds,planCreateAlphaCrop} from '../create-alpha.mjs';
+import {alphaBounds,planCreateAlphaCrop,planCreatePlacement} from '../create-alpha.mjs';
 
 test('Create PNG alpha is the only source of the object boundary',()=>{
   const w=32,h=24,pixels=new Uint8ClampedArray(w*h*4);
@@ -36,4 +36,26 @@ test('Create crop clamps source margins and refuses mismatched canvas dimensions
   assert.deepEqual(plan.sourceCrop,{x:22,y:40,width:40,height:30});
   assert.equal(planCreateAlphaCrop(new Uint8ClampedArray(w*h*4),w,h,{x:0,y:0,w,h}),null);
   assert.throws(()=>planCreateAlphaCrop(pixels,w,h,{x:0,y:0,w:41,h}),/dimensions/);
+});
+
+test('oversized Create fits its original box uniformly without cropping',()=>{
+  const alpha={x:20,y:10,width:300,height:180},region={x:40,y:50},target={x:180,y:140,w:120,h:150};
+  const plan=planCreatePlacement(alpha,region,target),d=plan.destination;
+  assert.equal(plan.scale,.4);assert.equal(d.w,120);assert.equal(d.h,72);
+  assert.equal(d.w/d.h,alpha.width/alpha.height);assert.deepEqual(plan.source,alpha);
+  assert(d.x>=target.x&&d.y>=target.y&&d.x+Math.ceil(d.w)<=target.x+target.w&&d.y+Math.ceil(d.h)<=target.y+target.h);
+});
+test('small Create stays at its existing size and location; misplaced output shifts into the box',()=>{
+  const target={x:100,y:100,w:200,h:160},region={x:80,y:80};
+  const within=planCreatePlacement({x:40,y:40,width:50,height:60},region,target);
+  assert.equal(within.scale,1);assert.equal(within.changed,false);
+  const outside=planCreatePlacement({x:0,y:0,width:50,height:60},region,target);
+  assert.equal(outside.scale,1);assert.deepEqual(outside.destination,{x:100,y:100,w:50,h:60});
+});
+test('tall and wide silhouettes at every scene edge retain proportions and fit',()=>{
+  for(const target of [{x:0,y:0,w:50,h:30},{x:750,y:570,w:50,h:30}])for(const size of [[400,40],[40,400],[300,300]]){
+    const plan=planCreatePlacement({x:0,y:0,width:size[0],height:size[1]},{x:0,y:0},target),d=plan.destination;
+    assert(plan.scale<=1);assert(Math.abs(d.w/d.h-size[0]/size[1])<1e-10);
+    assert(d.x>=target.x&&d.y>=target.y&&d.x+Math.ceil(d.w)<=target.x+target.w&&d.y+Math.ceil(d.h)<=target.y+target.h);
+  }
 });

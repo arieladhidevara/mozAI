@@ -258,3 +258,50 @@
  #mobileEditPane #quickAreaPromptForm .prompt-input-row{flex-wrap:wrap!important}
  #mobileEditPane #quickAreaPromptForm #quickAreaPromptInput{flex-basis:100%!important}
 }
+
+/* Local paint and the same Add option chooser on both editing surfaces. */
+#paintTool{position:relative;--paint-color:#d64444}
+#paintTool:before{content:'';position:absolute;bottom:3px;left:calc(50% - 7px);width:14px;height:3px;background:var(--paint-color);border-radius:2px;pointer-events:none}
+.quick-option.quick-add-option{flex:none;width:28px;min-width:28px;max-width:28px;border:1px dashed #9485a9;background:#ffffff07;color:#e8d5ff;justify-content:center;padding:0;font-size:16px;white-space:nowrap}
+.add-option-menu{position:fixed;z-index:2400;width:205px;padding:5px;background:#211f28;border:1px solid #62516e;border-radius:9px;box-shadow:0 6px 22px #0008;display:grid;gap:3px}
+.add-option-menu button{display:grid;gap:3px;text-align:left;padding:10px;border:0;border-radius:5px;background:transparent;color:#eee;cursor:pointer;font:12px system-ui}
+.add-option-menu button:hover,.add-option-menu button:focus-visible{background:#ffffff10;outline:1px solid #ad83d6}
+.add-option-menu small{font-size:10px;color:#b7acbf}.add-option-menu strong{font-weight:500}
+
+#quickPromptMorePanel .object-color-controls{order:0;display:grid;gap:8px;margin:3px 0 7px;padding:0 0 8px;border-bottom:1px solid #ffffff18}
+#quickPromptMorePanel .object-color-controls[hidden]{display:none!important}
+#quickPromptMorePanel .object-color-controls label{display:grid;gap:4px;margin:0;font-size:10px;color:#d6cedd}
+.object-color-controls .color-slider-heading{display:flex;justify-content:space-between;gap:5px}.object-color-controls output{color:#a99db5;font-variant-numeric:tabular-nums}
+#quickPromptMorePanel .object-color-controls input{min-width:0;width:100%;height:16px;margin:0;padding:0;accent-color:#c592ee;cursor:ew-resize}
+.paint-hover-overlay{position:absolute;pointer-events:none!important;opacity:.25;z-index:8;image-rendering:auto}
+
+.paint-hover-overlay[hidden]{display:none!important}
+
+/* Returning to a local session uses the same compact, dark workspace language. */
+#projectLoadDialog{width:min(440px,calc(100vw - 32px));max-width:440px;max-height:calc(100dvh - 32px);padding:24px;border-radius:18px;background:#141416;border:1px solid #ffffff20;color:#f4f0f7;box-shadow:0 28px 100px #0009;overflow:auto}
+#projectLoadDialog::backdrop{background:#000b;backdrop-filter:blur(6px)}
+.recovery-dialog-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.recovery-eyebrow{font:600 10px system-ui;letter-spacing:1.8px;color:#a99cb3}
+#projectLoadDialog .recovery-close{display:grid;place-items:center;width:28px;height:28px;padding:5px;border:0;border-radius:7px;color:#aca5b5;background:transparent}
+#projectLoadDialog .recovery-close:hover{background:#ffffff0d;color:#fff}
+#projectLoadDialog svg{display:block;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.recovery-close svg{width:16px;height:16px}
+#projectLoadDialog h2{margin:0 0 8px;font:600 23px/1.25 Manrope,system-ui,sans-serif;letter-spacing:-.8px}
+#projectLoadDialog #projectLoadDescription{margin:0 0 23px;color:#aaa2b2;font:12px/1.65 system-ui}
+.recovery-choices{display:grid;gap:10px}
+#projectLoadDialog .recovery-choice{display:flex;align-items:center;gap:13px;width:100%;min-height:82px;padding:16px;text-align:left;border:1px solid #ffffff16;border-radius:11px;background:#ffffff03;color:#ece6f2;transition:background .15s,border-color .15s}
+#projectLoadDialog .recovery-choice:hover{background:#ffffff08;border-color:#ffffff35}
+#projectLoadDialog .recovery-restore{border-color:#a279bb60;background:linear-gradient(120deg,#9c5dca1d,#9c5dca08)}
+#projectLoadDialog .recovery-restore:hover{border-color:#bd94db;background:#9c5dca25}
+#projectLoadDialog button:focus-visible{outline:2px solid #c49ae6;outline-offset:3px}
+.recovery-choice-icon{display:grid;place-items:center;width:36px;height:36px;flex:none;border:1px solid #ffffff13;border-radius:9px;color:#b6a8c2;background:#ffffff04}
+.recovery-restore .recovery-choice-icon{background:#b786df14;border-color:#b786df30;color:#c9a5e6}
+.recovery-choice-icon svg{width:21px;height:21px}
+.recovery-choice-copy{display:grid;gap:4px;min-width:0;flex:1}
+.recovery-choice-copy strong{font:600 13px/1.35 system-ui;color:#f1edf5}
+.recovery-choice-copy>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:11px/1.4 system-ui;color:#b2a8bc}
+.recovery-choice-copy small{font:10px/1.4 system-ui;color:#8f829a}
+.recovery-choice-arrow{width:16px;height:16px;color:#92859d}
+#projectLoadDialog .recovery-footnote{display:flex;align-items:center;gap:7px;margin:18px 0 0;color:#807988;font:10px/1.5 system-ui}
+.recovery-footnote svg{width:13px;height:13px}
+@media(max-width:480px){#projectLoadDialog{padding:20px;border-radius:15px}#projectLoadDialog h2{font-size:21px}#projectLoadDialog .recovery-choice{padding:14px;gap:11px}.recovery-choice-copy>span{font-size:10px}}

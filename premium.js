@@ -3,7 +3,7 @@ import './generation-pool.js';
 import './object-aware.js';
 import {assertGeneratedImage,assertGeneratedRegion} from './generated-image.mjs';
 import {alignGeneratedToLockedMask} from './geometry-mask.mjs';
-import {planCreateAlphaCrop} from './create-alpha.mjs';
+import {alphaBounds,planCreateAlphaCrop,planCreatePlacement} from './create-alpha.mjs';
 import {refineCreateCutout} from './create-segmentation.js';
 const core = window.MosaicCore;
 if (!core) throw new Error('Mosaic core must load before Premium');
@@ -554,6 +554,18 @@ async function classifyArea(mask){
 // Common Create path: keep the generated RGBA and its alpha mask in local
 // crop coordinates. Never allocate/read a 2400px full-scene pixel buffer just
 // to position a transparent foreground (the original Base is unchanged).
+function fitCreatedSubject(image,region,box,pixels=null){
+  const rgba=pixels||image.getContext('2d',{willReadFrequently:true}).getImageData(0,0,image.width,image.height).data;
+  const alpha=alphaBounds(rgba,image.width,image.height,1);
+  if(!alpha)throw Error('No visible pixels were returned for the new object.');
+  const plan=planCreatePlacement(alpha,region,box);
+  if(!plan.changed)return {image,rgba,scale:1};
+  const fitted=makeCanvas(region.w,region.h),ctx=fitted.getContext('2d',{willReadFrequently:true});
+  ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+  const d=plan.destination;
+  ctx.drawImage(image,alpha.x,alpha.y,alpha.width,alpha.height,d.x-region.x,d.y-region.y,d.w,d.h);
+  return {image:fitted,rgba:ctx.getImageData(0,0,fitted.width,fitted.height).data,scale:plan.scale};
+}
 function prepareCroppedCreateLayer(image,region,originalPixels=null){
   const layer=makeCanvas(region.w,region.h);
   const lc=layer.getContext('2d',{willReadFrequently:true});
@@ -614,7 +626,8 @@ async function retryCreateCleanup(patchId){
     const image=source.canvas,region={x:source.crop?.x||0,y:source.crop?.y||0,w:image.width,h:image.height};
     const result=await cleanCreatedSubject(image,patch.prompt,progress);
     if(state.patches.get(patchId)!==patch||state.selectionGeneration!==generation||patch.sourceId!==sourceId)return false;
-    const local=prepareCroppedCreateLayer(result.image,region),id=uid('cleaned_source');
+    const fitted=fitCreatedSubject(result.image,region,patch.createPlacementBox||core.exactMaskBoundingBox(core.fullPatchMask(patch)));
+    const local=prepareCroppedCreateLayer(fitted.image,region,fitted.rgba),id=uid('cleaned_source');
     state.sources.set(id,{id,name:'Cleaned Create object',...local.compact,revealComplete:true});
     Object.assign(patch,{sourceId:id,mask:local.mask,maskOffset:local.maskOffset,bbox:local.bbox,maskPaths:local.paths,
       maskPoints:local.paths.flat(),createCleanupPending:false,createCleanupWarning:'',createSegmentationLabel:result.label,
@@ -654,6 +667,8 @@ async function generateRegion(patchId,regenerate=false){
     renderGroups();progress.fail('Could not prepare the selected area.');toast('Local AI edit: '+error.message);return;
   }
   const submittedPatch={bbox:{...patch.bbox},corners:patch.corners?.map(point=>({...point}))||null};
+  const placementBox=patch.createObject?{...(regenerate?core.exactMaskBoundingBox(capture.visibleMask):patch.createPlacementBox||core.exactMaskBoundingBox(capture.visibleMask))}:null;
+  if(placementBox)patch.createPlacementBox=placementBox;
   const maskAtStart=window.MosaicObjects?.maskKey(core.fullPatchMask(patch));
   const overlapChoices=new Map(state.groups.map(g=>[g.id,core.groupChoiceVersion(g)]));
   const generationId=patch.sourceId;
@@ -693,7 +708,7 @@ async function generateRegion(patchId,regenerate=false){
       }
       if(patch.createObject){
         // Unlike Material Edit, the AI-generated alpha defines the silhouette.
-        // The drawn Create mask was only a placement hint and must never clip it.
+        // Keep its silhouette intact while fitting it inside the selected box.
         if(answer.mimeType!=='image/png')throw Error('Create requires a transparent PNG from OpenAI.');
         let rgba=image.getContext('2d',{willReadFrequently:true}).getImageData(0,0,image.width,image.height).data;
         let subjectPixels=0,clearPixels=0;
@@ -721,6 +736,10 @@ async function generateRegion(patchId,regenerate=false){
           if(state.patches.get(patchId)===patch)patch.generating=false;
           progress.done('Project changed; current work was kept.');return;
         }
+        // Keep an unclean, unapplied result at full resolution for a later SAM
+        // retry. Fit only the final cleaned subject, so retry does not resample twice.
+        const fitted=segmentation?fitCreatedSubject(image,region,placementBox,rgba):{image,rgba,scale:1};
+        image=fitted.image;rgba=fitted.rgba;existing.createPlacementScale=fitted.scale;
         progress.update(94,segmentation?'Applying the clean, softened object edges…':'Applying the generated transparent PNG…');
         // Untransformed Create cuts out locally. Explicit four-corner edits
         // still use the existing full-frame unwarp to preserve perspective.
@@ -1059,6 +1078,7 @@ function createRegionRequest(prompt,referenceImages=[],selectedMask=state.select
     // Manual Create is a new foreground identity, not a material edit on the
     // underlying wall/floor pixels. Let GPT return its own alpha silhouette.
     patch.createObject=true;
+    patch.createPlacementBox={...core.exactMaskBoundingBox(mask)};
     patch.editMode='create';
     patch.objectId=group.objectId||group.id;
   }

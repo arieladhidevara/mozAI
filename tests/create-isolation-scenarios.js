@@ -37,6 +37,7 @@ window.runCreateIsolationChecks=async function(){
     assert(document.querySelector('.geometry-mode-switcher')?.hidden,
       'Create should hide Material/Shape/Remove and use transparent PNG mode');
     const placeholder=state.patches.get(created.active),source=state.sources.get(placeholder.sourceId);
+    const placementBox={...core.exactMaskBoundingBox(core.groupMask(created))};
     const pixels=source.canvas.getContext('2d').getImageData(0,0,640,480).data;
     assert(pixels.every((value,index)=>index%4!==3||value===0),'Create copied underlying wall pixels');
     assert(core.composeApprovedCanvas().toDataURL()===originalScene,'Drawing Create modified the original scene');
@@ -102,6 +103,29 @@ window.runCreateIsolationChecks=async function(){
     assert(state.groups.some(g=>g.id===created.id),'Create result lost its independent Group');
     assert(core.composeApprovedCanvas().toDataURL()!==originalScene,'Transparent Create result did not composite');
     const cropPatch=state.patches.get(created.active),cropSource=state.sources.get(cropPatch.sourceId);
+    const assertFits=patch=>{
+      const b=patch.bbox;
+      assert(b.x>=placementBox.x&&b.y>=placementBox.y&&b.x+b.w<=placementBox.x+placementBox.w&&b.y+b.h<=placementBox.y+placementBox.h,'Create exceeded the user placement box');
+      const source=state.sources.get(patch.sourceId),rgba=source.canvas.getContext('2d').getImageData(0,0,source.canvas.width,source.canvas.height).data;
+      for(let y=0;y<source.canvas.height;y++)for(let x=0;x<source.canvas.width;x++)if(rgba[(y*source.canvas.width+x)*4+3]){
+        const wx=source.crop.x+x,wy=source.crop.y+y;
+        assert(wx>=placementBox.x&&wy>=placementBox.y&&wx<placementBox.x+placementBox.w&&wy<placementBox.y+placementBox.h,'Create alpha or shadow leaked outside placement box');
+      }
+    };
+    assertFits(cropPatch);
+    assert(cropPatch.createPlacementBox.w===placementBox.w&&cropPatch.createPlacementBox.h===placementBox.h,'Create did not retain its original placement limit');
+    checks.push('Oversized generated alpha fits entirely inside the user box, including shadows and retry results');
+    if(window.checkCreateRegenerate){
+      const previousPayload=payload,oldBox={...cropPatch.bbox};
+      const pending=ai.regenerateOption(cropPatch.id);
+      await wait(()=>payload!==previousPayload);
+      finish({image:cutout.toDataURL('image/png').split(',')[1],mimeType:'image/png'});
+      await pending;await wait(()=>!cropPatch.generating);
+      assertFits(cropPatch);
+      assert(cropPatch.bbox.w<=oldBox.w&&cropPatch.bbox.h<=oldBox.h,'Regenerate enlarged the accepted object');
+      checks.push('Regenerate keeps the accepted placement size and position limit');
+    }
+
     if(!failedInitially){
       const px=Math.floor(payload.crop.x+202/256*payload.crop.width-cropSource.crop.x);
       const py=Math.floor(payload.crop.y+168/256*payload.crop.height-cropSource.crop.y);
@@ -157,3 +181,5 @@ window.runCreateIsolationChecks=async function(){
 };
 
 window.runCreateSAMFailureChecks=async function(){window.createSAMFailure=true;try{return await window.runCreateIsolationChecks()}finally{window.createSAMFailure=false}};
+
+window.runCreateSizeRegenerateChecks=async function(){window.checkCreateRegenerate=true;try{return await window.runCreateIsolationChecks()}finally{window.checkCreateRegenerate=false}};

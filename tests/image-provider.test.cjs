@@ -97,6 +97,8 @@ test('image generation request contract',async t=>{
     assert.match(sent.prompt,/SCENE-CONDITIONED FOREGROUND OBJECT CREATION/);
     assert.match(sent.prompt,/TRUE TRANSPARENT PNG CONTRACT/);
     assert.match(sent.prompt,/PLACEMENT GUIDE: Image 4/);
+    assert.match(sent.prompt,/MAXIMUM width and height/);
+    assert.doesNotMatch(sent.prompt,/may extend beyond the approximate/);
     assert.match(sent.prompt,/Match the new object to the real scene perspective/);
     assert.doesNotMatch(sent.prompt,/MATERIAL \/ APPEARANCE GEOMETRY LOCK/);
   });

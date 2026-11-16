@@ -622,6 +622,10 @@ function focusGroupInSidebar(group){
   if(section)(section.querySelector('.group-head')||section).scrollIntoView({block:'nearest'});
 }
 const optionLoadTickets=new WeakMap();
+function recordGroupChoice(group){
+  optionChoiceVersions.set(group,groupChoiceVersion(group)+1);
+  optionLoadTickets.set(group,(optionLoadTickets.get(group)||0)+1);
+}
 async function chooseGroupOption(group,patchId,{showPrompt=false,showOutline=false}={}){
   if(!group||state.pendingSourceId||state.busy)return false;
   if(patchId!==null&&(!group.patchIds.includes(patchId)||!state.patches.has(patchId)))return false;
@@ -707,9 +711,10 @@ function refreshQuickOptions(){
   const ready=group?.patchIds.map(id=>state.patches.get(id)).filter(patch=>patch&&!patch.hideUntilReady)||[];
   if(rail.dataset.groupId!==String(group?.id||''))rail.open=false;
   rail.dataset.groupId=String(group?.id||'');
-  rail.replaceChildren();rail.hidden=!ready.length;
-  form.classList.toggle('has-group-options',Boolean(ready.length));
-  if(!ready.length)return;
+  rail.replaceChildren();rail.hidden=!group;
+  form.classList.toggle('has-group-options',Boolean(group));
+  window.MosaicPaint?.syncControls(group);
+  if(!group)return;
 
   const choices=(!group.hasHarmonizedMaster?[null]:[]).concat(ready);
   const list=document.createElement('div');list.className='quick-option-list';
@@ -723,6 +728,10 @@ function refreshQuickOptions(){
     button.onclick=()=>chooseGroupOption(group,patch?.id||null,{showPrompt:true,showOutline:false});
     list.append(button);
   });
+  const add=document.createElement('button');add.type='button';add.className='quick-option quick-add-option';
+  add.dataset.addOption=group.id;add.textContent='+';add.title='Add option';add.setAttribute('aria-label','Add option');
+  add.disabled=Boolean(state.busy||state.pendingSourceId||state.editingPatchId||group.objectRemoved);
+  add.onclick=()=>window.MosaicPaint?.showAddMenu(add,group);list.append(add);
   rail.append(list);
 }
 // Ctrl/Cmd-click unions existing selections, without modifying a saved Group.
@@ -852,14 +861,17 @@ function patchControlPoints(patch){
   return points.map(point=>({original:point,...displayedMaskPoint(point,patch)}));
 }
 function patchTexture(patch, source) {
-  const b=patch.bbox, key=[b.x,b.y,b.w,b.h,Boolean(state.featherEnabled)].join('/');
+  const adjustment=patch.colorAdjustment;
+  const b=patch.bbox, key=[b.x,b.y,b.w,b.h,Boolean(state.featherEnabled),adjustment?.hue||0,adjustment?.saturation??100].join('/');
   const cached=patchTextures.get(patch);
   if(cached && cached.source===source.canvas && cached.mask===patch.mask && cached.key===key)return cached;
   const pad=Math.max(4,Math.ceil(canvas.width/250)+2);
   const x=Math.max(0,Math.floor(b.x)-pad),y=Math.max(0,Math.floor(b.y)-pad);
   const right=Math.min(canvas.width,Math.ceil(b.x+b.w)+pad),bottom=Math.min(canvas.height,Math.ceil(b.y+b.h)+pad);
   const image=makeCanvas(Math.max(1,right-x),Math.max(1,bottom-y)),tc=image.getContext('2d');
+  if(adjustment)tc.filter=`hue-rotate(${adjustment.hue}deg) saturate(${adjustment.saturation}%)`;
   tc.drawImage(source.canvas,(source.crop?.x||0)-x,(source.crop?.y||0)-y);
+  tc.filter='none';
   tc.globalCompositeOperation='destination-in';
   const maskX=(patch.maskOffset?.x||0)-x,maskY=(patch.maskOffset?.y||0)-y;
   if(!state.featherEnabled||source.canvas===patch.mask||patch.isMasterVersion){tc.drawImage(patch.mask,maskX,maskY)}
@@ -1103,6 +1115,7 @@ function materialEditSnapshot(targets){
 }
 function render(){
   if(!state.master)return;
+  window.MosaicPaint?.validateHover();
   renderComparison();
   if(state.before){
     drawApprovedComposition(ctx);
@@ -1206,7 +1219,12 @@ function patchThumbnail(patch){
   const signature=[patch.bbox?.x,patch.bbox?.y,patch.bbox?.w,patch.bbox?.h,
     ...(patch.corners||[]).flatMap(p=>[p.x,p.y])].join('/');
   if(cached&&cached.source===src.canvas&&cached.mask===patch.mask&&cached.signature===signature)return cached.data;
-  const image=patch.corners?.length?renderedPatchLayer(patch):src.canvas;
+  let image=patch.corners?.length?renderedPatchLayer(patch):src.canvas;
+  if(patch.colorAdjustment&&!patch.corners?.length){
+    image=makeCanvas(src.canvas.width,src.canvas.height);const c=image.getContext('2d');
+    c.filter=`hue-rotate(${patch.colorAdjustment.hue}deg) saturate(${patch.colorAdjustment.saturation}%)`;
+    c.drawImage(src.canvas,0,0);
+  }
   const data=cutoutThumbnail(image,mask,patch.corners?.length?null:patch.maskOffset,
     patch.corners?.length?null:src.crop);
   optionThumbCache.set(patch,{source:src.canvas,mask:patch.mask,signature,data});
@@ -1249,7 +1267,7 @@ function sidebarGroupRecord(g){
     state.draftGroupId===g.id,sidebarGroupRevisions.get(g)||0,
     sidebarIdentity(state.master),sidebarIdentity(g.maskCrop?.mask),sidebarIdentity(g.footprint),
     ready.map(p=>[
-      p.id,p.name,p.generating||false,p.awaitingResult||false,p.aiProgress?.status,
+      p.id,p.name,p.colorAdjustment,p.generating||false,p.awaitingResult||false,p.aiProgress?.status,
       p.aiProgress?.value,p.aiProgress?.detail,p.sourceId,p.hideUntilReady||false,p.createCleanupPending||false,p.createCleanupWarning||'',
       state.maskEditOnly&&state.selectionTargetPatchId===p.id,
       expanded&&state.expandedOptionId===p.id,sidebarPatchRevisions.get(p)||0,
@@ -1466,7 +1484,7 @@ function renderGroups(){
   const quickKey=JSON.stringify([state.selectionGeneration,quickGroup?.id,quickGroup?.active,
     quickGroup?.hasHarmonizedMaster,quickGroup?.patchIds.map(id=>{
       const patch=state.patches.get(id);
-      return [id,patch?.hideUntilReady,patch?.name,patch?.sourceId,
+      return [id,patch?.hideUntilReady,patch?.name,patch?.sourceId,patch?.colorAdjustment,
         sidebarPatchRevisions.get(patch)||0,sidebarIdentity(state.sources.get(patch?.sourceId)?.canvas)];
     })]);
   if(sidebarQuickKey!==quickKey){sidebarQuickKey=quickKey;refreshQuickOptions()}
@@ -1532,6 +1550,7 @@ function selectTool(tool){
   }else if(state.selectionGeometry&&(drawing||['wand','reveal','erase','cut','transform'].includes(actual))){
     ensureSelectionMask();
   }
+  window.MosaicPaint?.clearHover();
   clearHover();clearDraft();hideQuickPrompt();
   state.tool=actual;
   state.toolIntent=drawing?(selectIntent?'select':'create'):null;
@@ -1548,9 +1567,10 @@ function selectTool(tool){
   }
   $('brushOptions').classList.toggle('hidden',actual!=='reveal'&&actual!=='erase');
   $('brushIntensityOptions').classList.toggle('hidden',actual!=='reveal'&&actual!=='erase');
-  overlay.style.cursor='';
+  overlay.style.cursor=actual==='paint'?'crosshair':'';
   if(actual==='select'&&state.boundaryCanvas)ensureSelectionPaths();
   if(actual==='select')message('Select an object, or draw an area using dashed Select tools.');
+  else if(actual==='paint')message('Paint: choose a color, then click an object. Only its active option changes.');
   else if(actual==='cut')message('Cut: click points and double-click to finish, or drag freehand.');
   else if(actual==='wand')message('Wand: click a prepared object. Ctrl/Cmd-click adds another.');
   else if(selectIntent)message('Select area with '+(actual==='lasso'?'Line':actual==='rect'?'Square':'Circle')+'. Use New, Add or Subtract to adjust the selection.');
@@ -2203,6 +2223,10 @@ function canCreateSelection(){return Boolean(state.master&&!state.pendingSourceI
 function canMask(){return Boolean(state.pendingSourceId||state.editingPatchId||(['lasso','rect','ellipse','wand'].includes(state.tool)&&canCreateSelection()))}
 function pointerDown(e){if(e.target.closest('form,button,input,textarea,select'))return;if(!state.master||state.busy||state.before||e.button!==0&&e.pointerType==='mouse')return;
   if(state.tool==='zoom'){e.preventDefault();zoomAt(state.zoom*(e.shiftKey||e.altKey?1/1.4:1.4),e.clientX,e.clientY);return}
+  if(state.tool==='paint'){
+    state.lastCanvasPointer={clientX:e.clientX,clientY:e.clientY};
+    e.preventDefault();void window.MosaicPaint?.paintAt(canvasPoint(e,false));return;
+  }
   if(state.tool==='transform'){const p=canvasPoint(e,false);beginTransform(e,p);return}
   if(state.tool==='pan'){state.panAnchor={x:e.clientX,y:e.clientY,left:$('viewport').scrollLeft,top:$('viewport').scrollTop};e.currentTarget.setPointerCapture(e.pointerId);return}
   state.lastCanvasPointer={clientX:e.clientX,clientY:e.clientY};
@@ -2627,5 +2651,5 @@ viewport.addEventListener('wheel',event=>{
 },{passive:false});
 window.addEventListener('mosaic:keyconnected',()=>state.groups.forEach(autoClassifyGroup));
 window.MosaicCore = {toggleQuickMore,materialEditSnapshot,bringObjectToFront,compactPatchMask,compactAllOptionMasks,fullPatchMask,expandPatchMask,selectionBounds,ensureSelectionMask,selectionContainsPoint,groupMaskCrop,compactOptionSource,expandOptionSource,sameMaskGeometry,shareMaterialOptionMask,shareSavedOptionMasks,detachSharedOptionMask,groupContainsPoint,appendGroupSelection,newGroup,newGroupFromCrop,matchingGroup,applyWandMask,svgNode,vectorLayer,drawVectorPaths,maskPathsFromRaster,maskPathsFromCrop,state,canvas,overlay,ctx,makeCanvas,uid,setProjectTitle,toast,message,promptText,loadFileToCanvas,setMaster,continueWithBase,upgradeBaseDraft,setSourcePreview,updateSourceActions,render,composeApprovedCanvas,renderGroups,drawPatch,selectTool,setMode,clearObjectSelection,updateApplyButton,maskBoundingBox,assignGroup,resetSelection,updateSelectionOutline,trimUndo,updateMaskWithLasso,updateZoomFit,escapeHTML,categoryFromText,updateGroupCategory,optionNameFromPrompt,prepareSelectionGroup,groupMask,selectGroupMask,CATEGORIES,showQuickPrompt,hideQuickPrompt,createBlankRegion,moveOptionToGroup,displayedPatchMask,renderedPatchLayer,refreshGroupFootprint,invalidateDisplayedMask,attachGeneratedSelection,patchSelectionPaths,exactMaskBoundingBox,unwarpPatchSelection,patchControlPoints,displayedMaskPoint};
-Object.assign(window.MosaicCore,{focusGroupInSidebar,chooseGroupOption,groupChoiceVersion,toggleComparison,canCreateSelection,releaseSourceTexture,releasePatchTexture});
+Object.assign(window.MosaicCore,{recordGroupChoice,focusGroupInSidebar,chooseGroupOption,groupChoiceVersion,toggleComparison,canCreateSelection,releaseSourceTexture,releasePatchTexture});
 promptText();

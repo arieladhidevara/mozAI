@@ -111,7 +111,7 @@
           throw Error('Recovery exceeds 500 MB. Use Save Project to keep a permanent copy.');
         const now = Date.now();
         await write(snapshotOwner, {blob, updatedAt: now, expiresAt: now + TTL_MS,
-          saved: snapshotSaved, version: 1});
+          name:project.ui?.projectName||'',saved: snapshotSaved, version: 1});
         lastWriteAt = now;
         persistedRevision = snapshotRevision;
         pendingSave = revision !== snapshotRevision || manuallySaved !== snapshotSaved;
@@ -162,6 +162,12 @@
       setStatus('Auto-recovery · Every 2 min · 24h');
       return false;
     }
+    const name=document.getElementById('projectRecoveryName'),savedAt=document.getElementById('projectRecoverySavedAt');
+    if(name)name.textContent=pendingRecovery.name||'Continue editing on this device';
+    const date=new Date(pendingRecovery.updatedAt);
+    if(savedAt)savedAt.textContent=Number.isFinite(date.getTime())
+      ?'Saved '+date.toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})
+      :'Saved in this browser';
     if (!loadDialog.open) loadDialog.showModal();
     return true;
   }
