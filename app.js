@@ -1,3 +1,5 @@
+import {unwarpQuadPixels,warpQuadPixels} from './geometry-mask.mjs';
+import {resizeCreatedQuad} from './object-resize.mjs';
 import {planSidebarRender} from './sidebar-render-state.mjs';
 import {createMobilePinch} from './mobile-pinch.mjs';
 import {isCreatedGroup,orderedSceneGroups,bringGroupToFront,createdOccluderCandidates} from './object-mask-utils.mjs';
@@ -793,6 +795,7 @@ function optionNameFromPrompt(prompt,fallback='New option'){
 
 // Non-destructive four-corner warp. The source pixels and original mask stay intact.
 const patchTextures = new WeakMap();
+const warpedPatchTextures=new WeakMap();
 const visibleMaskCache = new WeakMap();
 const maskHandleCache = new WeakMap();
 const sidebarPatchRevisions=new WeakMap();
@@ -802,6 +805,7 @@ function invalidateDisplayedMask(patch,{geometryChanged=true}={}){
   if(geometryChanged){if(patch?.mask)fullFrameMaskCache.delete(patch.mask);window.MosaicObjects?.invalidated(patch)}
   visibleMaskCache.delete(patch);
   patchTextures.delete(patch);
+  warpedPatchTextures.delete(patch);
   maskHandleCache.delete(patch);
   optionThumbCache.delete(patch);
 }
@@ -895,15 +899,22 @@ function bilinear(quad,u,v){
 function unwarpPatchSelection(selection,patch){
   if(!patch.corners?.length)return selection;
   const output=makeCanvas(canvas.width,canvas.height),target=output.getContext('2d');
-  const quad=patchCorners(patch),b=patch.bbox,steps=8;
-  const original=(u,v)=>({x:b.x+u*b.w,y:b.y+v*b.h});
-  for(let y=0;y<steps;y++)for(let x=0;x<steps;x++){
-    const u=x/steps,v=y/steps,nu=(x+1)/steps,nv=(y+1)/steps;
-    const a=bilinear(quad,u,v),bb=bilinear(quad,nu,v),c=bilinear(quad,nu,nv),d=bilinear(quad,u,nv);
-    const A=original(u,v),B=original(nu,v),C=original(nu,nv),D=original(u,nv);
-    affineTriangle(target,selection,a,bb,c,A,B,C);
-    affineTriangle(target,selection,a,c,d,A,C,D);
+  const quad=patchCorners(patch),b=patch.bbox;
+  const affine=Math.hypot(quad[0].x+quad[2].x-quad[1].x-quad[3].x,quad[0].y+quad[2].y-quad[1].y-quad[3].y)<.05;
+  if(affine){
+    const a=(quad[1].x-quad[0].x)/b.w,c=(quad[3].x-quad[0].x)/b.h;
+    const bb=(quad[1].y-quad[0].y)/b.w,d=(quad[3].y-quad[0].y)/b.h,det=a*d-bb*c;
+    if(!Number.isFinite(det)||Math.abs(det)<1e-8)throw Error('Object transform is invalid. Reset its position before generating.');
+    target.save();target.setTransform(d/det,-bb/det,-c/det,a/det,
+      b.x-(d*quad[0].x-c*quad[0].y)/det,b.y-(-bb*quad[0].x+a*quad[0].y)/det);
+    target.drawImage(selection,0,0);target.restore();return output;
   }
+  const box={x:Math.max(0,Math.floor(b.x)),y:Math.max(0,Math.floor(b.y))};
+  box.w=Math.min(canvas.width,Math.ceil(b.x+b.w))-box.x;box.h=Math.min(canvas.height,Math.ceil(b.y+b.h))-box.y;
+  if(box.w<=0||box.h<=0)return output;
+  const pixels=selection.getContext('2d').getImageData(0,0,selection.width,selection.height).data;
+  const rgba=unwarpQuadPixels(pixels,selection.width,selection.height,quad,b,box),data=target.createImageData(box.w,box.h);
+  data.data.set(rgba);target.putImageData(data,box.x,box.y);
   return output;
 }
 function pointToOriginalMask(point,patch){
@@ -946,7 +957,7 @@ function drawPatch(target,patch,source){
   const t=patchTexture(patch,source);
   if(!patch.corners){target.drawImage(t.image,t.x,t.y);return}
   const q=patchCorners(patch),b=patch.bbox;
-  // Parallelograms need just one draw; arbitrary 4-point skew gets a piecewise affine mesh.
+  // Parallelograms need one draw; general quads use cached inverse bilinear sampling.
   const affine=Math.hypot(q[0].x+q[2].x-q[1].x-q[3].x,q[0].y+q[2].y-q[1].y-q[3].y)<.05;
   if(affine){
     const a=(q[1].x-q[0].x)/b.w,bb=(q[1].y-q[0].y)/b.w;
@@ -955,15 +966,18 @@ function drawPatch(target,patch,source){
     target.save();target.transform(a,bb,c,d,q[0].x-a*sx-c*sy,q[0].y-bb*sx-d*sy);
     target.drawImage(t.image,0,0);target.restore();return;
   }
-  const uvSource=(u,v)=>({x:b.x+u*b.w-t.x,y:b.y+v*b.h-t.y});
-  const steps=8;
-  for(let y=0;y<steps;y++)for(let x=0;x<steps;x++){
-    const u=x/steps,v=y/steps,un=(x+1)/steps,vn=(y+1)/steps;
-    const A=uvSource(u,v),B=uvSource(un,v),C=uvSource(un,vn),D=uvSource(u,vn);
-    const a=bilinear(q,u,v),bb=bilinear(q,un,v),c=bilinear(q,un,vn),d=bilinear(q,u,vn);
-    affineTriangle(target,t.image,A,B,C,a,bb,c);
-    affineTriangle(target,t.image,A,C,D,a,c,d);
-  }
+  const signature=q.flatMap(p=>[p.x,p.y]).join('/'),cached=warpedPatchTextures.get(patch);
+  if(cached?.texture===t.image&&cached.signature===signature){target.drawImage(cached.image,cached.x,cached.y);return;}
+  const bounds=patchDisplayBounds(patch),left=Math.max(0,Math.floor(bounds.x)-1),top=Math.max(0,Math.floor(bounds.y)-1);
+  const right=Math.min(canvas.width,Math.ceil(bounds.x+bounds.w)+1),bottom=Math.min(canvas.height,Math.ceil(bounds.y+bounds.h)+1);
+  if(right<=left||bottom<=top)return;
+  const layer=makeCanvas(right-left,bottom-top),mesh=layer.getContext('2d');
+  const pixels=t.image.getContext('2d').getImageData(0,0,t.image.width,t.image.height).data;
+  const rgba=warpQuadPixels(pixels,t.image.width,t.image.height,{x:b.x-t.x,y:b.y-t.y,w:b.w,h:b.h},q,
+    {x:left,y:top,w:layer.width,h:layer.height}),data=mesh.createImageData(layer.width,layer.height);
+  data.data.set(rgba);mesh.putImageData(data,0,0);
+  warpedPatchTextures.set(patch,{texture:t.image,signature,image:layer,x:left,y:top});
+  target.drawImage(layer,left,top);
 }
 function convexCorners(q){
   let sign=0;
@@ -987,6 +1001,21 @@ function transformHit(p,patch,handlesOnly=false){
   const alpha=displayedPatchMask(patch).getContext('2d',{willReadFrequently:true}).getImageData(Math.floor(p.x),Math.floor(p.y),1,1).data[3];
   return alpha>0?{kind:'move'}:null;
 }
+function resizeBoxCorners(patch){
+  const b=patchDisplayBounds(patch);return [{x:b.x,y:b.y},{x:b.x+b.w,y:b.y},{x:b.x+b.w,y:b.y+b.h},{x:b.x,y:b.y+b.h}];
+}
+function resizeHit(p,patch){
+  const group=state.groups.find(g=>g.active===patch.id);
+  if(!isCreatedGroup(group))return null;
+  const index=resizeBoxCorners(patch).findIndex(q=>Math.hypot(p.x-q.x,p.y-q.y)<12/state.zoom);
+  return index<0?null:{kind:'resize',index};
+}
+function startCreatedResize(groupId){
+  const group=state.groups.find(g=>g.id===groupId),patch=state.patches.get(group?.active);
+  if(!isCreatedGroup(group)||!patch||patch.generating||patch.awaitingResult||patch.localCutoutRemoval||patch.createCleanupPending||
+    state.busy||state.before||state.pendingSourceId||state.editingPatchId||window.MosaicPremium?.isPreviewing()||window.MosaicSourceEditor?.isEditing())return false;
+  selectGroupMask(group,{showOutline:false});selectTool('resize');drawOverlay();return true;
+}
 function activeTransformPatch(){
   const patch=state.patches.get(state.selectedPatchId);
   return patch&&state.groups.some(g=>g.active===patch.id)?patch:null;
@@ -999,7 +1028,8 @@ function deselectCanvasRegion(){
 }
 function beginTransform(e,p){
   if(state.pendingSourceId||state.editingPatchId||window.MosaicPremium?.isPreviewing())return false;
-  let patch=activeTransformPatch(),hit=patch&&transformHit(p,patch);
+  let patch=activeTransformPatch(),hit=patch&&(state.tool==='resize'?resizeHit(p,patch):transformHit(p,patch));
+  if(state.tool==='resize'&&!hit)return false;
   if(!hit){
     for(const group of orderedSceneGroups(state.groups).slice().reverse()){
       const other=state.patches.get(group.active);if(!other)continue;
@@ -1018,8 +1048,11 @@ function beginTransform(e,p){
 function moveTransform(p){
   const drag=state.transformDrag;if(!drag)return;
   const patch=state.patches.get(drag.patchId);if(!patch)return;
-  const dx=p.x-drag.start.x,dy=p.y-drag.start.y,arr=copyCorners(drag.initial);
-  if(drag.hit.kind==='corner'){
+  const dx=p.x-drag.start.x,dy=p.y-drag.start.y;
+  let arr=copyCorners(drag.initial);
+  if(drag.hit.kind==='resize'){
+    arr=resizeCreatedQuad(drag.initial,drag.hit.index,drag.start,p,canvas.width,canvas.height);
+  }else if(drag.hit.kind==='corner'){
     // Drive the existing four-corner warp from the user's actual mask vertex.
     // Bilinear weights keep the vertex under the pointer without changing the
     // stored image, mask, or the transform format used by older projects.
@@ -1048,7 +1081,9 @@ function endTransform(){
     const patch=state.patches.get(drag.patchId),group=state.groups.find(g=>g.patchIds.includes(drag.patchId));
     if(patch)invalidateDisplayedMask(patch);
     if(group)refreshGroupFootprint(group);
-    message('Layer and selection moved together. Drag corners to skew; Undo to revert.');
+    if(drag.hit.kind==='resize'){if(group)selectGroupMask(group,{showOutline:false});selectTool('resize');}
+    message(drag.hit.kind==='resize'?'Object resized. Image and mask stay aligned. Undo to revert.':'Layer and selection moved together. Drag corners to skew; Undo to revert.');
+    window.MosaicRecovery?.markChanged?.();
     renderGroups();
   }
   drawOverlay();if(state.tool==='select'&&drag&&!drag.moved)showQuickPrompt(state.lastCanvasPointer);
@@ -1178,10 +1213,11 @@ function drawOverlay(){ox.clearRect(0,0,overlay.width,overlay.height);drawDraftP
   if(state.before||window.MosaicPremium?.isPreviewing()){maskAddButton.hidden=maskRemoveButton.hidden=true;clearHover();return}
   if(!window.MosaicWorkspace?.isSelectingResult())window.MosaicPremium?.drawRegionGuides();
   if(!state.selectionOverlayHidden&&state.boundaryCanvas&&!window.MosaicObjects?.drawPreview(ox,vectors))drawVectorPaths(vectors,ensureSelectionPaths(),{fill:state.tool==='select'?'rgba(151,109,231,.22)':'none',dashed:true});
-  const chosen=state.tool==='transform' && !state.pendingSourceId && !state.editingPatchId && activeTransformPatch();
+  const chosen=['transform','resize'].includes(state.tool) && !state.pendingSourceId && !state.editingPatchId && activeTransformPatch();
   if(chosen){
-    drawVectorPaths(vectors,patchSelectionPaths(chosen),{dashed:true});
-    for(const p of patchControlPoints(chosen)){const r=3/state.zoom;vectors.append(svgNode('rect',{x:p.x-r,y:p.y-r,width:r*2,height:r*2,fill:'#f5f0ff',stroke:'#6555bd','stroke-width':1,'vector-effect':'non-scaling-stroke'}))}
+    const resizing=state.tool==='resize',points=resizing?resizeBoxCorners(chosen):patchControlPoints(chosen);
+    drawVectorPaths(vectors,resizing?[points]:patchSelectionPaths(chosen),{dashed:true});
+    for(const p of points){const r=3/state.zoom;vectors.append(svgNode('rect',{x:p.x-r,y:p.y-r,width:r*2,height:r*2,fill:'#f5f0ff',stroke:'#6555bd','stroke-width':1,'vector-effect':'non-scaling-stroke'}))}
   }else if(state.boundaryCanvas&&!state.selectionOverlayHidden&&state.tool!=='select'){
     for(const point of state.selectionPoints||[])vectors.append(svgNode('circle',{cx:point.x,cy:point.y,r:2.5/state.zoom,fill:'#e4e2ff'}));
   }
@@ -1233,6 +1269,7 @@ function patchThumbnail(patch){
 function releasePatchTexture(patch){
   if(!patch)return;
   patchTextures.delete(patch);
+  warpedPatchTextures.delete(patch);
   visibleMaskCache.delete(patch);
   maskHandleCache.delete(patch);
   // Keep the tiny thumbnail but discard its strong full-size source reference.
@@ -1570,6 +1607,7 @@ function selectTool(tool){
   overlay.style.cursor=actual==='paint'?'crosshair':'';
   if(actual==='select'&&state.boundaryCanvas)ensureSelectionPaths();
   if(actual==='select')message('Select an object, or draw an area using dashed Select tools.');
+  else if(actual==='resize')message('Drag a corner to resize the created object proportionally. Its mask follows automatically.');
   else if(actual==='paint')message('Paint: choose a color, then click an object. Only its active option changes.');
   else if(actual==='cut')message('Cut: click points and double-click to finish, or drag freehand.');
   else if(actual==='wand')message('Wand: click a prepared object. Ctrl/Cmd-click adds another.');
@@ -2174,7 +2212,7 @@ function historyStep(from,to){
     const patch=state.patches.get(entry.patchId);if(!patch)return;
     to.push({type:'placement',patchId:patch.id,placement:placementSnapshot(patch)});Object.assign(patch,entry.placement);invalidateDisplayedMask(patch);
     const group=state.groups.find(g=>g.patchIds.includes(patch.id));if(group)refreshGroupFootprint(group);
-    if(state.selectionTargetPatchId===patch.id){state.selectionMask=cloneMask(displayedPatchMask(patch));setSelectionPaths(patchSelectionPaths(patch));updateSelectionOutline()}
+    if(state.selectionTargetPatchId===patch.id){state.selectionGeometry=null;state.selectionMask=cloneMask(displayedPatchMask(patch));setSelectionPaths(patchSelectionPaths(patch));updateSelectionOutline()}
     renderGroups();render();return;
   }
   if(entry.type==='transform'){
@@ -2184,7 +2222,7 @@ function historyStep(from,to){
     invalidateDisplayedMask(patch);
     const group=state.groups.find(g=>g.patchIds.includes(patch.id));
     if(group)refreshGroupFootprint(group);
-    if(state.selectionTargetPatchId===patch.id){state.selectionMask=cloneMask(displayedPatchMask(patch));setSelectionPaths(patchSelectionPaths(patch));updateSelectionOutline()}
+    if(state.selectionTargetPatchId===patch.id){state.selectionGeometry=null;state.selectionMask=cloneMask(displayedPatchMask(patch));setSelectionPaths(patchSelectionPaths(patch));updateSelectionOutline()}
     renderGroups();render();return;
   }
   // Undo/redo uses putImageData, which mutates in place. Restore on a private
@@ -2205,7 +2243,7 @@ function historyStep(from,to){
     invalidateDisplayedMask(patch);
     const group=state.groups.find(g=>g.patchIds.includes(patch.id));
     if(group)refreshGroupFootprint(group);
-    if(state.selectionTargetPatchId===patch.id){state.selectionMask=cloneMask(displayedPatchMask(patch));setSelectionPaths(patchSelectionPaths(patch));updateSelectionOutline()}
+    if(state.selectionTargetPatchId===patch.id){state.selectionGeometry=null;state.selectionMask=cloneMask(displayedPatchMask(patch));setSelectionPaths(patchSelectionPaths(patch));updateSelectionOutline()}
   }
   renderGroups();render();
 }
@@ -2227,7 +2265,7 @@ function pointerDown(e){if(e.target.closest('form,button,input,textarea,select')
     state.lastCanvasPointer={clientX:e.clientX,clientY:e.clientY};
     e.preventDefault();void window.MosaicPaint?.paintAt(canvasPoint(e,false));return;
   }
-  if(state.tool==='transform'){const p=canvasPoint(e,false);beginTransform(e,p);return}
+  if(state.tool==='transform'||state.tool==='resize'){const p=canvasPoint(e,false);beginTransform(e,p);return}
   if(state.tool==='pan'){state.panAnchor={x:e.clientX,y:e.clientY,left:$('viewport').scrollLeft,top:$('viewport').scrollTop};e.currentTarget.setPointerCapture(e.pointerId);return}
   state.lastCanvasPointer={clientX:e.clientX,clientY:e.clientY};
   if(state.tool==='select'){
@@ -2298,7 +2336,7 @@ function pointerMove(e){
   if(Number.isFinite(e.clientX)&&Number.isFinite(e.clientY))
     state.lastCanvasPointer={clientX:e.clientX,clientY:e.clientY};
   if(state.tool==='wand'){window.MosaicSlimWand?.hoverAt?.(canvasPoint(e,false));return}
-  window.MosaicRegions?.onPointerMove(e);if(state.tool==='transform'){if(state.transformDrag){moveTransform(canvasPoint(e))}else{const patch=activeTransformPatch(),hit=patch&&transformHit(canvasPoint(e,false),patch);overlay.style.cursor=hit?(hit.kind==='corner'?'crosshair':'move'):'default'}return}if(state.tool==='pan'&&state.panAnchor){$('viewport').scrollLeft=state.panAnchor.left-(e.clientX-state.panAnchor.x);$('viewport').scrollTop=state.panAnchor.top-(e.clientY-state.panAnchor.y);return}
+  window.MosaicRegions?.onPointerMove(e);if(state.tool==='transform'||state.tool==='resize'){if(state.transformDrag){moveTransform(canvasPoint(e))}else{const patch=activeTransformPatch(),hit=patch&&(state.tool==='resize'?resizeHit(canvasPoint(e,false),patch):transformHit(canvasPoint(e,false),patch));overlay.style.cursor=hit?(hit.kind==='resize'?(hit.index%2?'nesw-resize':'nwse-resize'):hit.kind==='corner'?'crosshair':'move'):'default'}return}if(state.tool==='pan'&&state.panAnchor){$('viewport').scrollLeft=state.panAnchor.left-(e.clientX-state.panAnchor.x);$('viewport').scrollTop=state.panAnchor.top-(e.clientY-state.panAnchor.y);return}
   const p=canvasPoint(e,!['lasso','rect','ellipse'].includes(state.tool));
   if(state.tool==='lasso'){if(state.lasso.length){if(state.drawing&&state.pointerStart&&Math.hypot(p.x-state.pointerStart.x,p.y-state.pointerStart.y)>4/state.zoom)state.dragFreehand=true;if(state.drawing&&state.dragFreehand&&Math.hypot(p.x-state.lasso.at(-1).x,p.y-state.lasso.at(-1).y)>1/state.zoom)state.lasso.push(p);state.hoverPoint=p;drawOverlay()}return}
   if(!state.drawing)return;
@@ -2382,6 +2420,7 @@ function pointerCancel(){finishBrushRepaint();if(state.pointerBoxStart){state.po
     }
     state.drawing=false;state.lastPoint=null;state.pointerStart=null;state.shapeStart=null;state.shapeEnd=null;if(state.dragFreehand)state.lasso=[];state.dragFreehand=false;drawOverlay()}}
 function onKeys(e){if(e.key==='Escape'&&state.before){e.preventDefault();toggleComparison(false);return}if(e.target.matches('input,textarea,select,[contenteditable="true"]')||e.repeat&&e.key==='Enter')return;
+  if(state.tool==='resize'&&['Escape','Enter'].includes(e.key)){e.preventDefault();if(state.transformDrag)endTransform();selectTool('select');return;}
   if(state.tool==='cut'&&window.MosaicObjectCreateCut?.isCutting?.()&&['Escape','Enter'].includes(e.key)){
     e.preventDefault();if(e.key==='Enter')window.MosaicObjectCreateCut.endCut();else{window.MosaicObjectCreateCut.cancelCut();message('Unfinished cut canceled.')}return;
   }
@@ -2651,5 +2690,5 @@ viewport.addEventListener('wheel',event=>{
 },{passive:false});
 window.addEventListener('mosaic:keyconnected',()=>state.groups.forEach(autoClassifyGroup));
 window.MosaicCore = {toggleQuickMore,materialEditSnapshot,bringObjectToFront,compactPatchMask,compactAllOptionMasks,fullPatchMask,expandPatchMask,selectionBounds,ensureSelectionMask,selectionContainsPoint,groupMaskCrop,compactOptionSource,expandOptionSource,sameMaskGeometry,shareMaterialOptionMask,shareSavedOptionMasks,detachSharedOptionMask,groupContainsPoint,appendGroupSelection,newGroup,newGroupFromCrop,matchingGroup,applyWandMask,svgNode,vectorLayer,drawVectorPaths,maskPathsFromRaster,maskPathsFromCrop,state,canvas,overlay,ctx,makeCanvas,uid,setProjectTitle,toast,message,promptText,loadFileToCanvas,setMaster,continueWithBase,upgradeBaseDraft,setSourcePreview,updateSourceActions,render,composeApprovedCanvas,renderGroups,drawPatch,selectTool,setMode,clearObjectSelection,updateApplyButton,maskBoundingBox,assignGroup,resetSelection,updateSelectionOutline,trimUndo,updateMaskWithLasso,updateZoomFit,escapeHTML,categoryFromText,updateGroupCategory,optionNameFromPrompt,prepareSelectionGroup,groupMask,selectGroupMask,CATEGORIES,showQuickPrompt,hideQuickPrompt,createBlankRegion,moveOptionToGroup,displayedPatchMask,renderedPatchLayer,refreshGroupFootprint,invalidateDisplayedMask,attachGeneratedSelection,patchSelectionPaths,exactMaskBoundingBox,unwarpPatchSelection,patchControlPoints,displayedMaskPoint};
-Object.assign(window.MosaicCore,{recordGroupChoice,focusGroupInSidebar,chooseGroupOption,groupChoiceVersion,toggleComparison,canCreateSelection,releaseSourceTexture,releasePatchTexture});
+Object.assign(window.MosaicCore,{startCreatedResize,recordGroupChoice,focusGroupInSidebar,chooseGroupOption,groupChoiceVersion,toggleComparison,canCreateSelection,releaseSourceTexture,releasePatchTexture});
 promptText();

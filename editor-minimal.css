@@ -305,3 +305,7 @@
 #projectLoadDialog .recovery-footnote{display:flex;align-items:center;gap:7px;margin:18px 0 0;color:#807988;font:10px/1.5 system-ui}
 .recovery-footnote svg{width:13px;height:13px}
 @media(max-width:480px){#projectLoadDialog{padding:20px;border-radius:15px}#projectLoadDialog h2{font-size:21px}#projectLoadDialog .recovery-choice{padding:14px;gap:11px}.recovery-choice-copy>span{font-size:10px}}
+
+#quickPromptMorePanel #createdResizeBtn{order:1}#quickPromptMorePanel #createdResizeBtn[hidden]{display:none!important}
+
+#quickAreaPromptForm.hidden,#mobileEditPane #quickAreaPromptForm.hidden{display:none!important}

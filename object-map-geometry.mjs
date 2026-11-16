@@ -1,4 +1,4 @@
-import {splitColorInstances,CLEANUP_VERSION} from './object-map-cleanup.mjs';
+import {splitColorInstances,refineInstanceEdges,CLEANUP_VERSION} from './object-map-cleanup.mjs';
 import {PALETTE,CATEGORIES} from './object-map-utils.mjs';
 export function readInstanceLabels(map){
   const rgba=map.raster.getContext('2d',{willReadFrequently:true}).getImageData(0,0,map.raster.width,map.raster.height).data;
@@ -6,10 +6,13 @@ export function readInstanceLabels(map){
   for(let i=0;i<labels.length;i++)labels[i]=map.version>=3?rgba[i*4]|rgba[i*4+1]<<8|rgba[i*4+2]<<16:rgba[i*4];
   return labels;
 }
-export function prepareInstanceMap(map,makeCanvas,geometry){
+export function prepareInstanceMap(map,makeCanvas,geometry,referencePixels=null){
   const raw=map.colorRaster||map.raster,w=raw.width,h=raw.height,rgba=raw.getContext('2d',{willReadFrequently:true}).getImageData(0,0,w,h).data;
   const colors=new Uint8Array(w*h);for(let i=0;i<colors.length;i++)colors[i]=rgba[i*4];
-  const split=splitColorInstances(colors,w,h),output=new Uint32Array(w*h),tolerance=Math.min(3,Math.max(.75,Math.min(w,h)*.0025));
+  const split=splitColorInstances(colors,w,h),output=new Uint32Array(w*h);
+  const refinement=referencePixels?refineInstanceEdges(split.labels,w,h,referencePixels):null;
+  if(refinement)split.labels=refinement.labels;
+  const tolerance=referencePixels?.length?Math.min(1,Math.max(.5,Math.min(w,h)*.001)):Math.min(3,Math.max(.75,Math.min(w,h)*.0025));
   const localPixels=(object,labels)=>{
     const padding=Math.ceil(tolerance)+2,b=object.box,x=Math.max(0,b.x-padding),y=Math.max(0,b.y-padding),right=Math.min(w,b.x+b.w+padding),bottom=Math.min(h,b.y+b.h+padding);
     const frame=makeCanvas(right-x,bottom-y),ctx=frame.getContext('2d'),pixels=ctx.createImageData(frame.width,frame.height);
@@ -55,5 +58,5 @@ export function prepareInstanceMap(map,makeCanvas,geometry){
   for(const object of objects){const key=object.category+':'+object.label.toLowerCase(),ordinal=(ordinals.get(key)||0)+1;ordinals.set(key,ordinal);if(counts.get(key)>1)object.label+=' '+ordinal}
   const raster=makeCanvas(w,h),ctx=raster.getContext('2d'),pixels=ctx.createImageData(w,h);
   for(let i=0;i<output.length;i++){pixels.data[i*4]=output[i]&255;pixels.data[i*4+1]=output[i]>>8&255;pixels.data[i*4+2]=output[i]>>16&255;pixels.data[i*4+3]=255}ctx.putImageData(pixels,0,0);
-  return {...map,version:CLEANUP_VERSION,colorRaster:raw,colorEntries,raster,entries:objects,smoothTolerance:tolerance};
+  return {...map,version:CLEANUP_VERSION,colorRaster:raw,colorEntries,raster,entries:objects,smoothTolerance:tolerance,...(refinement?{edgeCleanup:{version:1,changed:refinement.changed,antialias:true}}:{})};
 }

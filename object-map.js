@@ -209,7 +209,7 @@ async function prepareBase(force=false){
     for(let i=0;i<decoded.labels.length;i++){pixels.data[i*4]=decoded.labels[i];pixels.data[i*4+3]=255}x.putImageData(pixels,0,0);
     if(ticket!==serial||state.master!==base)return;
     const legend=new Map((answer.legend||[]).map(entry=>[entry.id,entry]));
-    state.objectMap=prepareInstanceMap({sourceKey:sourceKey(base),raster:map,labelsAvailable:Boolean(answer.labelsAvailable),qualityWarnings:decoded.warnings,entries:decoded.ids.map(id=>{const item=legend.get(id);return {id,color:PALETTE[id-1].color,category:CATEGORIES.includes(item?.category)?item.category:'Other',group:item?.group||'',label:item?.label||'Object '+id}})},makeCanvas,window.MozMaskGeometry);
+    state.objectMap=prepareInstanceMap({sourceKey:sourceKey(base),raster:map,labelsAvailable:Boolean(answer.labelsAvailable),qualityWarnings:decoded.warnings,entries:decoded.ids.map(id=>{const item=legend.get(id);return {id,color:PALETTE[id-1].color,category:CATEGORIES.includes(item?.category)?item.category:'Other',group:item?.group||'',label:item?.label||'Object '+id}})},makeCanvas,window.MozMaskGeometry,sample.getContext('2d').getImageData(0,0,w,h).data);
     (state.objectMaps??={})[state.objectMap.sourceKey]=state.objectMap;
     hydrate();
     if(pendingClick&&active){const pending=pendingClick;pendingClick=null;selectAt(pending.point,pending.options)}
@@ -228,6 +228,27 @@ async function prepareBase(force=false){
 function maskCropForEntry(entry){
   const crop=cropObjectLabel(labels,mapWidth,mapHeight,entry.box,entry.id,canvas.width,canvas.height);
   if(!crop)return null;
+  if(state.objectMap?.edgeCleanup?.antialias){
+    // Antialias only at raster edges while scaling the ID mask to the original
+    // image. Keep genuine openings and never blur the entire object mask.
+    const left=Math.max(0,entry.box.x-1),top=Math.max(0,entry.box.y-1);
+    const right=Math.min(mapWidth,entry.box.x+entry.box.w+1),bottom=Math.min(mapHeight,entry.box.y+entry.box.h+1);
+    const local=makeCanvas(right-left,bottom-top),lc=local.getContext('2d'),rgba=lc.createImageData(local.width,local.height);
+    for(let y=0;y<local.height;y++)for(let x=0;x<local.width;x++)if(labels[(top+y)*mapWidth+left+x]===entry.id)rgba.data.fill(255,(y*local.width+x)*4,(y*local.width+x)*4+4);
+    lc.putImageData(rgba,0,0);
+    const sx=canvas.width/mapWidth,sy=canvas.height/mapHeight,x=Math.max(0,Math.floor(left*sx)),y=Math.max(0,Math.floor(top*sy));
+    const mask=makeCanvas(Math.ceil(right*sx)-x,Math.ceil(bottom*sy)-y),ctx=mask.getContext('2d');
+    ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+    ctx.drawImage(local,left*sx-x,top*sy-y,local.width*sx,local.height*sy);
+    // Keep ownership exact: antialias inward only. Even a one-pixel opening or
+    // adjacent object remains excluded instead of receiving a feather halo.
+    const smooth=ctx.getImageData(0,0,mask.width,mask.height);
+    for(let yy=0;yy<mask.height;yy++)for(let xx=0;xx<mask.width;xx++){
+      const mapX=Math.min(mapWidth-1,Math.floor((x+xx)/sx)),mapY=Math.min(mapHeight-1,Math.floor((y+yy)/sy));
+      if(labels[mapY*mapWidth+mapX]!==entry.id)smooth.data[(yy*mask.width+xx)*4+3]=0;
+    }
+    ctx.putImageData(smooth,0,0);return {mask,x,y};
+  }
   const mask=makeCanvas(crop.width,crop.height),ctx=mask.getContext('2d'),pixels=ctx.createImageData(crop.width,crop.height);
   for(let i=0;i<crop.alpha.length;i++)if(crop.alpha[i])pixels.data.fill(255,i*4,i*4+4);
   ctx.putImageData(pixels,0,0);

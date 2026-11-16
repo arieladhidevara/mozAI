@@ -1,3 +1,4 @@
+import {isCreatedGroup} from './object-mask-utils.mjs';
 import {paintPixels} from './paint-color.mjs';
 import './object-reconstruction.js';
 const core=window.MosaicCore,{state,makeCanvas}=core;
@@ -7,6 +8,9 @@ const controls=document.createElement('div');controls.className='object-color-co
 controls.innerHTML='<label><span class="color-slider-heading">Hue <output id="objectHueValue">0°</output></span><input id="objectHue" type="range" min="-180" max="180" step="1" value="0" aria-label="Object hue"></label><label><span class="color-slider-heading">Saturation <output id="objectSaturationValue">100%</output></span><input id="objectSaturation" type="range" min="0" max="200" step="1" value="100" aria-label="Object saturation"></label>';
 document.getElementById('quickPromptMorePanel').prepend(controls);
 const hue=document.getElementById('objectHue'),saturation=document.getElementById('objectSaturation');
+const resizeButton=document.createElement('button');resizeButton.type='button';resizeButton.id='createdResizeBtn';resizeButton.className='btn btn-quiet compact';resizeButton.textContent='Resize';resizeButton.hidden=true;
+document.getElementById('quickPromptMorePanel').append(resizeButton);
+resizeButton.addEventListener('click',()=>core.startCreatedResize(selectedGroup()?.id));
 const hover=document.createElement('canvas');hover.id='paintHoverOverlay';hover.className='paint-hover-overlay';hover.hidden=true;
 hover.setAttribute('aria-hidden','true');document.getElementById('canvasWrap').append(hover);
 let hoverTarget=null,hoverCrop=null,hoverColor=null,lastHoverPoint=null,hoverFrame=0;
@@ -92,7 +96,7 @@ async function paint(group,color=picker.value){
     mc.drawImage(paintMask,(maskOffset?.x||0)-(source.crop?.x||0),(maskOffset?.y||0)-(source.crop?.y||0));
     pixels.data.set(paintPixels(pixels.data,color,mc.getImageData(0,0,mask.width,mask.height).data));ctx.putImageData(pixels,0,0);
     const id=prepared.active||core.uid('patch'),patch={...prepared.patch,id,groupId:group.id,sourceId:source.id,
-      name:prepared.patch.name||'Paint '+color,manualName:true,paintColor:color,localOption:true};
+      name:prepared.active?(prepared.patch.name||'Paint '+color):'Paint '+color,manualName:true,paintColor:color,localOption:true};
     delete patch.colorAdjustment;
     clearHover();commit(group,patch,source,before);core.toast('Paint applied to this option.');return id;
   }catch(error){core.toast(error.message);return false}finally{pending=false}
@@ -118,6 +122,8 @@ function selectedGroup(){return state.groups.find(g=>g.id===state.draftGroupId||
 function syncControls(group=selectedGroup()){
   if(controls.dataset.groupId!==(group?.id||'')){gesture=null;controls.dataset.groupId=group?.id||''}
   controls.hidden=!available(group)||Boolean(state.objectSelectionParts?.length>1);
+  resizeButton.hidden=!isCreatedGroup(group)||!state.patches.get(group?.active)||!available(group)||Boolean(state.objectSelectionParts?.length>1);
+  resizeButton.disabled=Boolean(state.patches.get(group?.active)?.localCutoutRemoval);
   const value=state.patches.get(group?.active)?.colorAdjustment||{hue:0,saturation:100};
   if(queuedAdjustment?.group!==group){hue.value=value.hue;saturation.value=value.saturation}
   document.getElementById('objectHueValue').textContent=hue.value+'°';

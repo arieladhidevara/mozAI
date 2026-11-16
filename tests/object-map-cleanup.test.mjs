@@ -1,8 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {splitColorInstances} from '../object-map-cleanup.mjs';
+import {splitColorInstances,refineInstanceEdges} from '../object-map-cleanup.mjs';
 import {idsInShape} from '../object-map-utils.mjs';
 const fixture=()=>{const width=100,height=100,colors=new Uint8Array(width*height);return {width,height,colors,rect(x,y,w,h,id){for(let yy=y;yy<y+h;yy++)colors.fill(id,yy*width+x,yy*width+x+w)},at(x,y){return y*width+x}}};
+
+test('photo-supported cleanup removes false edge spikes while preserving the input labels',()=>{
+  const w=20,h=20,labels=new Uint32Array(w*h).fill(2),rgb=new Uint8ClampedArray(w*h*4);
+  for(let y=4;y<16;y++)for(let x=3;x<11;x++)labels[y*w+x]=1;
+  for(let p=0;p<labels.length;p++)rgb.set(labels[p]===1?[200,45,30,255]:[40,80,180,255],p*4);
+  labels[9*w+11]=1;labels[11*w+11]=1; // The photograph still shows background here.
+  const result=refineInstanceEdges(labels,w,h,rgb);
+  assert.equal(result.labels[9*w+11],2);assert.equal(result.labels[11*w+11],2);
+  assert.equal(result.labels[9*w+10],1);assert.equal(labels[9*w+11],1);
+  assert.ok(result.changed>=2);
+});
+test('real tips, thin rails and genuine unknown holes survive cleanup',()=>{
+  const w=20,h=20,labels=new Uint32Array(w*h).fill(2),rgb=new Uint8ClampedArray(w*h*4);
+  for(let y=4;y<16;y++)for(let x=3;x<11;x++)labels[y*w+x]=1;
+  labels[9*w+11]=1;labels[8*w+7]=0;
+  for(let y=3;y<17;y++)labels[y*w+16]=3;
+  for(let p=0;p<labels.length;p++)rgb.set(labels[p]===1?[200,45,30,255]:[40,80,180,255],p*4);
+  const result=refineInstanceEdges(labels,w,h,rgb);
+  assert.equal(result.labels[9*w+11],1);assert.equal(result.labels[8*w+7],0);
+  for(let y=3;y<17;y++)assert.equal(result.labels[y*w+16],3);
+});
+test('photographic cleanup does not invent ownership on a low contrast boundary',()=>{
+  const w=12,h=12,labels=new Uint32Array(w*h).fill(2),rgb=new Uint8ClampedArray(w*h*4).fill(128);
+  for(let y=3;y<9;y++)for(let x=3;x<7;x++)labels[y*w+x]=1;
+  labels[5*w+7]=1;
+  const result=refineInstanceEdges(labels,w,h,rgb);
+  assert.deepEqual(result.labels,labels);assert.equal(result.changed,0);
+});
 test('distant same-color components remain separate objects',()=>{
   const f=fixture();f.rect(5,10,25,30,2);f.rect(70,10,20,25,2);
   const {labels,objects}=splitColorInstances(f.colors,100,100);

@@ -5,6 +5,47 @@ export const MAX_OBJECTS=2048;
 export const CLEANUP_VERSION=4;
 const NEIGHBORS=[[0,-1],[-1,0],[1,0],[0,1]];
 
+// Only correct a weak boundary pixel when both its neighboring labels and the
+// original photograph support the alternative. Never grow into unknown holes,
+// remove a one-pixel rail, or blur RGB/IDs across two objects.
+export function refineInstanceEdges(labels,width,height,rgba){
+  if(labels.length!==width*height||rgba.length!==labels.length*4)throw Error('Invalid edge reference dimensions.');
+  let source=labels,changed=0;
+  for(let pass=0;pass<2;pass++){
+    const result=source.slice();let edits=0;
+    for(let y=1;y<height-1;y++)for(let x=1;x<width-1;x++){
+      const p=y*width+x,id=source[p];if(!id)continue;
+      if(source[p-1]===id&&source[p+1]===id&&source[p-width]===id&&source[p+width]===id)continue;
+      if(source[p-1]===id&&source[p+1]===id||source[p-width]===id&&source[p+width]===id||
+        source[p-width-1]===id&&source[p+width+1]===id||source[p-width+1]===id&&source[p+width-1]===id)continue;
+      const neighbors=[p-width-1,p-width,p-width+1,p-1,p+1,p+width-1,p+width,p+width+1];
+      let same=1,best=0,votes=0;
+      for(const n of neighbors)if(source[n]===id)same++;
+      if(same>4)continue;
+      for(const n of neighbors){
+        const candidate=source[n];if(!candidate||candidate===id)continue;
+        let count=0;for(const q of neighbors)if(source[q]===candidate)count++;
+        if(count>votes){votes=count;best=candidate}
+      }
+      if(votes<5)continue;
+      const current=[0,0,0],alternative=[0,0,0];let count=0;
+      for(const n of neighbors){
+        if(source[n]===id){for(let c=0;c<3;c++)current[c]+=rgba[n*4+c];count++}
+        else if(source[n]===best)for(let c=0;c<3;c++)alternative[c]+=rgba[n*4+c];
+      }
+      if(!count)continue;
+      let currentError=0,alternativeError=0;
+      for(let c=0;c<3;c++){
+        currentError+=(rgba[p*4+c]-current[c]/count)**2;
+        alternativeError+=(rgba[p*4+c]-alternative[c]/votes)**2;
+      }
+      if(alternativeError+192<currentError*.55){result[p]=best;edits++}
+    }
+    source=result;changed+=edits;if(!edits)break;
+  }
+  return {labels:source,changed};
+}
+
 // Estimate fragmentation cheaply before spending memory on components.
 function unstableRatio(colors,w,h){
   let differences=0,checks=0;

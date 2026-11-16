@@ -185,7 +185,7 @@ export function perspectivePixels(rgba,mask,width,height,fit,sampleWidth=width,s
   for(let y=0;y<height;y++)for(let x=0;x<width;x++){
     const i=y*width+x;if(!mask[i])continue;
     const p=projectPoint(fit.matrix,{x:(x+.5)*sx,y:(y+.5)*sy},fit.frame),xx=p.x/sx-.5,yy=p.y/sy-.5;
-    if(xx<0||yy<0||xx>width-1||yy>height-1)return null;
+    if(!Number.isFinite(xx)||!Number.isFinite(yy)||xx<0||yy<0||xx>width-1||yy>height-1)return null;
     const x0=Math.floor(xx),y0=Math.floor(yy),x1=Math.min(width-1,x0+1),y1=Math.min(height-1,y0+1),fx=xx-x0,fy=yy-y0;
     const indices=[(y0*width+x0)*4,(y0*width+x1)*4,(y1*width+x0)*4,(y1*width+x1)*4];
     const weights=[(1-fx)*(1-fy),fx*(1-fy),(1-fx)*fy,fx*fy];
@@ -194,6 +194,60 @@ export function perspectivePixels(rgba,mask,width,height,fit,sampleWidth=width,s
     for(let c=0;c<3;c++){let value=0;for(let k=0;k<4;k++)value+=rgba[indices[k]+c]*weights[k];output[i*4+c]=value}
   }
   return output;
+}
+
+// One premultiplied bilinear sample per output pixel. Transparent RGB never
+// contributes black fringes, and there are no independently antialiased mesh
+// edges to punch holes into an otherwise opaque object.
+function sampleQuadPixel(rgba,width,height,x,y,out,offset){
+  if(!Number.isFinite(x)||!Number.isFinite(y)||x<=-1||y<=-1||x>=width||y>=height)return;
+  const left=Math.floor(x),top=Math.floor(y),fx=x-left,fy=y-top;
+  let alpha=0,r=0,g=0,b=0;
+  for(let yy=0;yy<2;yy++)for(let xx=0;xx<2;xx++){
+    const sx=left+xx,sy=top+yy;if(sx<0||sy<0||sx>=width||sy>=height)continue;
+    const i=(sy*width+sx)*4,weight=(xx?fx:1-fx)*(yy?fy:1-fy)*rgba[i+3]/255;
+    alpha+=weight;r+=rgba[i]*weight;g+=rgba[i+1]*weight;b+=rgba[i+2]*weight;
+  }
+  if(!alpha)return;
+  out[offset]=r/alpha;out[offset+1]=g/alpha;out[offset+2]=b/alpha;out[offset+3]=alpha*255;
+}
+function validateQuadPixels(rgba,width,height,quad){
+  if(rgba.length!==width*height*4||quad.length!==4||quad.some(p=>!Number.isFinite(p.x)||!Number.isFinite(p.y)))
+    throw new TypeError('Invalid quad image dimensions.');
+}
+export function unwarpQuadPixels(rgba,width,height,quad,originalBox,outputBox=originalBox){
+  validateQuadPixels(rgba,width,height,quad);
+  const out=new Uint8ClampedArray(outputBox.w*outputBox.h*4);
+  const [a,b,c,d]=quad;
+  for(let y=0;y<outputBox.h;y++)for(let x=0;x<outputBox.w;x++){
+    const u=(outputBox.x+x+.5-originalBox.x)/originalBox.w,v=(outputBox.y+y+.5-originalBox.y)/originalBox.h;
+    const sx=a.x*(1-u)*(1-v)+b.x*u*(1-v)+c.x*u*v+d.x*(1-u)*v;
+    const sy=a.y*(1-u)*(1-v)+b.y*u*(1-v)+c.y*u*v+d.y*(1-u)*v;
+    sampleQuadPixel(rgba,width,height,sx-.5,sy-.5,out,(y*outputBox.w+x)*4);
+  }
+  return out;
+}
+export function warpQuadPixels(rgba,width,height,sourceBox,quad,outputBox){
+  validateQuadPixels(rgba,width,height,quad);
+  const out=new Uint8ClampedArray(outputBox.w*outputBox.h*4),a=quad[0];
+  const bx=quad[1].x-a.x,by=quad[1].y-a.y,dx=quad[3].x-a.x,dy=quad[3].y-a.y;
+  const cx=quad[2].x-quad[1].x-quad[3].x+a.x,cy=quad[2].y-quad[1].y-quad[3].y+a.y;
+  const determinant=bx*dy-by*dx;
+  if(!Number.isFinite(determinant)||Math.abs(determinant)<1e-8)throw Error('Object transform is invalid.');
+  for(let y=0;y<outputBox.h;y++)for(let x=0;x<outputBox.w;x++){
+    const px=outputBox.x+x+.5-a.x,py=outputBox.y+y+.5-a.y;
+    let u=(px*dy-py*dx)/determinant,v=(py*bx-px*by)/determinant,valid=true;
+    for(let step=0;step<10;step++){
+      const ex=bx*u+dx*v+cx*u*v-px,ey=by*u+dy*v+cy*u*v-py;
+      if(Math.abs(ex)+Math.abs(ey)<1e-6)break;
+      const ux=bx+cx*v,uy=by+cy*v,vx=dx+cx*u,vy=dy+cy*u,det=ux*vy-uy*vx;
+      if(!Number.isFinite(det)||Math.abs(det)<1e-8){valid=false;break;}
+      u-=(ex*vy-ey*vx)/det;v-=(ey*ux-ex*uy)/det;
+    }
+    if(!valid||Math.abs(bx*u+dx*v+cx*u*v-px)+Math.abs(by*u+dy*v+cy*u*v-py)>.001)continue;
+    sampleQuadPixel(rgba,width,height,sourceBox.x+u*sourceBox.w-.5,sourceBox.y+v*sourceBox.h-.5,out,(y*outputBox.w+x)*4);
+  }
+  return out;
 }
 export function alignGeneratedToLockedMask({before,generated,lockedMask,makeCanvas,maxDimension=320}){
   if(!before||!generated||!lockedMask||!makeCanvas)return {image:generated,status:'unavailable',aligned:false};

@@ -813,8 +813,10 @@ async function generateRegion(patchId,regenerate=false){
       const generatedLayer=makeCanvas(canvasSize.width,canvasSize.height);
       generatedLayer.getContext('2d').drawImage(image,region.x,region.y,region.w,region.h);
       const resultMasks=existing.objectMapParts?.map(part=>part.mask)||[visibleMask];
+      const validation={generationId:answer.generationId||null,provider:[],alignment:null,inverseWarp:null};
+      state.lastGenerationDiagnostics=validation;
       for(const mask of resultMasks)
-        validateRegionalResult(generatedLayer,capture.collage,mask,payload.prompt,'provider-region',answer.generationId);
+        validation.provider.push(validateRegionalResult(generatedLayer,capture.collage,mask,payload.prompt,'provider-region',answer.generationId));
       progress.update(92,'Checking key edges for gentle perspective alignment…');
       const placed=cloneCanvas(capture.collage);
       placed.getContext('2d').drawImage(image,region.x,region.y,region.w,region.h);
@@ -830,12 +832,22 @@ async function generateRegion(patchId,regenerate=false){
       }
       if(state.patches.get(patchId)!==patch||state.selectionGeneration!==projectAtStart||existing.sourceId!==generationId){existing.generating=false;return}
       if(!existing.objectMapParts?.length)
-        validateRegionalResult(aligned.image,capture.collage,visibleMask,payload.prompt,'mask-alignment',answer.generationId);
+        validation.alignment=validateRegionalResult(aligned.image,capture.collage,visibleMask,payload.prompt,'mask-alignment',answer.generationId);
       const currentMaskUnchanged=maskAtStart===window.MosaicObjects?.maskKey(core.fullPatchMask(existing));
       // Preserve the complete unmasked RGB source for Reveal/Add.
       // Restore source coordinates before the existing option warp; this does
       // NOT alter the saved selection or its immutable Object ID.
       const result=core.unwarpPatchSelection(aligned.image,submittedPatch);
+      if(submittedPatch.corners?.length&&!existing.objectMapParts?.length){
+        // Check the actual restored RGB in display coordinates before saving it.
+        // Raw provider/alignment validation alone cannot see inverse-warp seams.
+        const box=submittedPatch.bbox,rectangle=makeCanvas(Math.ceil(box.w),Math.ceil(box.h));
+        rectangle.getContext('2d').fillRect(0,0,rectangle.width,rectangle.height);
+        const restored=makeCanvas(canvasSize.width,canvasSize.height);
+        core.drawPatch(restored.getContext('2d'),{...submittedPatch,mask:rectangle,maskOffset:{x:box.x,y:box.y},isMasterVersion:true}, {canvas:result});
+        validation.inverseWarp=validateRegionalResult(restored,capture.collage,visibleMask,payload.prompt,'inverse-warp',answer.generationId);
+      }
+      existing.generationValidation=validation;
       existing.maskAlignmentStatus=aligned.status;
       existing.maskAlignmentSegmentation=aligned.segmentation||null;
       existing.maskAlignmentIoU=Number.isFinite(aligned.iou)?aligned.iou:null;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {calculateMaskDelta,structuralLines,fitPerspectiveLines,projectPoint,estimatePerspective,perspectivePixels} from '../geometry-mask.mjs';
+import {calculateMaskDelta,structuralLines,fitPerspectiveLines,projectPoint,estimatePerspective,perspectivePixels,unwarpQuadPixels,warpQuadPixels} from '../geometry-mask.mjs';
 
 test('shape grows: expanded pixels are occlusions, not revealed background',()=>{
   const a=Uint8Array.from([0,1,1,0,0]);
@@ -112,4 +112,39 @@ test('correction requiring pixels outside the image is declined instead of stret
   const input=scene(),mask=new Uint8Array(input.width*input.height).fill(1);
   const fit=fitPerspectiveLines(pairsFor([1,0,.01,0,1,0,0,0,1]),box);assert.ok(fit.approved);
   assert.equal(perspectivePixels(input.after,mask,input.width,input.height,fit),null);
+});
+
+test('invalid projection coordinates cannot silently turn RGB into opaque black',()=>{
+  const input=scene();
+  for(const value of [NaN,Infinity,-Infinity]){
+    const fit={matrix:[1,0,value,0,1,0,0,0,1],frame:{x:0,y:0,scale:1}};
+    assert.equal(perspectivePixels(input.after,input.mask,input.width,input.height,fit),null);
+  }
+  const singular={matrix:[1,0,0,0,1,0,0,0,1],frame:{x:0,y:0,scale:0}};
+  assert.equal(perspectivePixels(input.after,input.mask,input.width,input.height,singular),null);
+});
+
+test('bilinear quad identity preserves every pixel and alpha hole',()=>{
+  const w=20,h=16,data=new Uint8ClampedArray(w*h*4),quad=[{x:0,y:0},{x:w,y:0},{x:w,y:h},{x:0,y:h}],box={x:0,y:0,w,h};
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(x<8||x>11||y<6||y>9)data.set([100+x,80+y,40,255],(y*w+x)*4);
+  assert.deepEqual(unwarpQuadPixels(data,w,h,quad,box),data);
+  assert.deepEqual(warpQuadPixels(data,w,h,box,quad,box),data);
+});
+test('transparent black texels do not darken the interpolated object color',()=>{
+  const data=new Uint8ClampedArray([200,100,50,255,0,0,0,0]);
+  const quad=[{x:0,y:0},{x:2,y:0},{x:2,y:1},{x:0,y:1}];
+  assert.deepEqual([...unwarpQuadPixels(data,2,1,quad,{x:0,y:0,w:1,h:1})],[200,100,50,128]);
+});
+test('skewed quad sampling preserves constant semitransparent color without seams',()=>{
+  const w=32,h=24,data=new Uint8ClampedArray(w*h*4);for(let i=0;i<data.length;i+=4)data.set([200,120,60,102],i);
+  const quad=[{x:4,y:3},{x:28,y:2},{x:29,y:22},{x:3,y:21}],box={x:0,y:0,w:16,h:12};
+  const restored=unwarpQuadPixels(data,w,h,quad,box);
+  for(let i=0;i<restored.length;i+=4)assert.deepEqual([...restored.slice(i,i+4)],[200,120,60,102]);
+  const output=warpQuadPixels(data,w,h,{x:4,y:4,w:24,h:16},quad,{x:0,y:0,w,h});
+  assert.deepEqual([...output.slice((12*w+16)*4,(12*w+16)*4+4)],[200,120,60,102]);
+});
+test('invalid quad data is rejected without allocating an opaque black result',()=>{
+  const quad=[{x:0,y:0},{x:8,y:0},{x:8,y:8},{x:0,y:8}],box={x:0,y:0,w:8,h:8};
+  assert.throws(()=>unwarpQuadPixels(new Uint8Array(4),8,8,quad,box),/Invalid quad/);
+  assert.throws(()=>warpQuadPixels(new Uint8Array(256),8,8,box,quad.map(p=>({x:p.x,y:NaN})),box),/Invalid quad/);
 });
